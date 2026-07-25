@@ -1,11 +1,44 @@
 # windows-dictation — Living Handover Document
 
-**Last updated:** 2026-07-09 — "Transcribe File" feature built
-**Status:** Steps 1–4 + window/live-caption rework confirmed on both platforms. "Transcribe File" upload feature built (per Kevin's priority order: this before packaging), not yet tested on either platform. Outstanding: test Transcribe File, Step 5 (run on login), real Teams test, packaging (deferred).
+**Last updated:** 2026-07-25 — pywebview UI rework + file-transcription trim
+**Status:** Steps 1–4 + live-caption rework confirmed on both platforms. UI reworked from tkinter to pywebview (dark-themed web UI with animated waveform, live transcript, status cells, settings panel). "Transcribe File" feature removed — file transcription belongs to `meeting-transcriber`. Outstanding: Mac retest after UI rework, Step 5 (run on login), real Teams test, packaging (deferred).
+
+---
+
+## Session 2026-07-25 — pywebview UI rework + file-transcription trim
+
+Two changes in one session:
+
+**1. UI reworked from tkinter to pywebview.** The basic tkinter window (status label + text box + "Transcribe File" button) has been replaced with a web-based UI rendered in a native window via `pywebview`. The new UI is based on Kevin's HTML mockup and provides:
+- Dark-themed interface (`#111827` base, gradient accents, glassmorphism panels)
+- Real-time animated waveform that responds to actual microphone audio levels
+- Live partial transcript area with auto-scroll
+- Pipeline status cells (Capture / Whisper / Cleanup / Paste) that highlight as each stage runs
+- Hotkey badge showing which key to hold
+- Settings panel (gear icon toggle) for changing the Ollama cleanup model and viewing read-only config
+- State machine with visual transitions: idle → recording → transcribing → cleaning up → pasting → idle (with error state)
+
+The entire Python backend (hotkey listener, audio capture, partial transcription loop, transcribe.py, cleanup.py, inject.py) is completely unchanged — only the window/UI layer was replaced.
+
+New files: `ui/index.html`, `ui/styles.css`, `ui/app.js`. New dependency: `pywebview` in `requirements.txt`.
+
+**2. "Transcribe File" feature removed.** Per Kevin's brief, this tool is for live push-to-talk dictation only (like Wispr / Eloquent). File transcription belongs to `meeting-transcriber`. Removed from `main.py`: `choose_audio_file()`, `_process_audio_file()`, `AUDIO_FILETYPES`, `file_processing`, `file_button`, filedialog/messagebox imports. Removed from `transcribe.py`: file-path branch (`isinstance(audio, (str, Path))`), `pathlib` import, ffmpeg docstring references.
+
+**Not yet tested.** Needs testing on both platforms:
+1. Does the pywebview window open and display correctly?
+2. Does the waveform respond to audio levels while recording?
+3. Does the live partial transcript update correctly?
+4. Does the full pipeline still work (transcribe → cleanup → paste)?
+5. Does the settings panel display and save correctly?
+6. Does closing the window quit cleanly?
+
+**Next action:** Kevin tests on Windows first, then Mac.
 
 ---
 
 ## Session 2026-07-09 (continued) — "Transcribe File" built
+
+**Note (2026-07-25): This feature has been removed.** File transcription now belongs to `meeting-transcriber`. The code described below was removed in the 2026-07-25 session.
 
 Kevin's priority order: Transcribe File first, then a packaging design conversation.
 

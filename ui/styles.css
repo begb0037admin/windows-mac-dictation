@@ -1,0 +1,529 @@
+/* windows-dictation — web UI styles
+   Based on Kevin's mockup, adapted for pywebview app window. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+
+:root {
+  --ink: #eaf1ff;
+  --ink-dim: #b8c4d6;
+  --ink-muted: #8a95a8;
+  --bg: #111827;
+  --bg-elevated: rgba(255, 255, 255, 0.06);
+  --bg-panel: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-active: rgba(255, 255, 255, 0.18);
+  --accent-cyan: #8dd8ff;
+  --accent-green: #6ce2b6;
+  --accent-blue: #2f63d8;
+  --accent-red: #f87171;
+  --accent-amber: #fbbf24;
+  --gradient-wave: linear-gradient(180deg, #8dd8ff, #6ce2b6);
+  --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.24), transparent 19rem);
+  --radius: 8px;
+  --radius-lg: 12px;
+  --transition: 0.2s ease;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.5;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Layout ── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--gradient-bg), var(--bg);
+}
+
+/* ── Header ── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-app-region: drag;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #111827, var(--accent-blue));
+  box-shadow: 0 8px 20px rgba(17, 24, 39, 0.3);
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.icon-btn:hover {
+  border-color: var(--border-active);
+  color: var(--ink);
+  background: var(--bg-panel);
+}
+
+.icon-btn.active {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  background: rgba(141, 216, 255, 0.1);
+}
+
+/* ── Main content ── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+/* ── Dictation View ── */
+
+.view { display: none; }
+.view.active { display: block; }
+
+.hotkey-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ink);
+  transition: all var(--transition);
+}
+
+.hotkey-badge .key {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+}
+
+/* ── Status indicator ── */
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  transition: color var(--transition);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--ink-muted);
+  transition: all var(--transition);
+}
+
+/* State-specific status styling */
+.app.state-recording .status-indicator { color: var(--accent-green); }
+.app.state-recording .status-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 0 4px rgba(108, 226, 182, 0.2), 0 0 12px rgba(108, 226, 182, 0.3);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.app.state-transcribing .status-indicator,
+.app.state-cleanup .status-indicator { color: var(--accent-cyan); }
+.app.state-transcribing .status-dot,
+.app.state-cleanup .status-dot {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 0 4px rgba(141, 216, 255, 0.2);
+}
+
+.app.state-pasting .status-indicator { color: var(--accent-green); }
+.app.state-pasting .status-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 0 4px rgba(108, 226, 182, 0.2);
+}
+
+.app.state-error .status-indicator { color: var(--accent-red); }
+.app.state-error .status-dot {
+  background: var(--accent-red);
+  box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.2);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+/* ── Waveform ── */
+
+.waveform-container {
+  height: 120px;
+  display: grid;
+  grid-template-columns: repeat(42, 1fr);
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.app.state-recording .waveform-container {
+  border-color: rgba(108, 226, 182, 0.3);
+  box-shadow: 0 0 20px rgba(108, 226, 182, 0.08), inset 0 0 20px rgba(108, 226, 182, 0.03);
+}
+
+.wave-bar {
+  height: 12px;
+  min-height: 6px;
+  border-radius: 99px;
+  background: var(--gradient-wave);
+  opacity: 0.3;
+  transition: height 0.1s ease-out, opacity 0.1s ease-out;
+  transform-origin: center;
+}
+
+.app.state-recording .wave-bar {
+  opacity: 0.85;
+}
+
+.app.state-idle .wave-bar {
+  animation: wave-idle 2.4s ease-in-out infinite;
+}
+
+@keyframes wave-idle {
+  0%, 100% { transform: scaleY(0.5); opacity: 0.2; }
+  50% { transform: scaleY(0.8); opacity: 0.35; }
+}
+
+/* ── Live caption ── */
+
+.caption-panel {
+  min-height: 100px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  transition: border-color var(--transition);
+}
+
+.app.state-recording .caption-panel {
+  border-color: rgba(108, 226, 182, 0.25);
+}
+
+.caption-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--accent-cyan);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.caption-text {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 40px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.caption-text::-webkit-scrollbar { width: 4px; }
+.caption-text::-webkit-scrollbar-track { background: transparent; }
+.caption-text::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 99px;
+}
+
+.caption-text .finalized {
+  color: var(--ink);
+}
+
+.caption-text .in-progress {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+.caption-placeholder {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+/* ── Status cells ── */
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.status-cell {
+  min-height: 56px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  transition: all var(--transition);
+}
+
+.status-cell strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.status-cell span {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.status-cell.active {
+  border-color: rgba(108, 226, 182, 0.3);
+  background: rgba(108, 226, 182, 0.06);
+}
+
+.status-cell.active span {
+  color: var(--accent-green);
+}
+
+/* ── Settings View ── */
+
+.settings {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-section {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.field-row {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field-row:last-child { margin-bottom: 0; }
+
+.field-row label {
+  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.field-row .hint {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.field {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: all var(--transition);
+}
+
+.field:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 3px rgba(141, 216, 255, 0.12);
+}
+
+.field:disabled, .field[readonly] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select.field {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23b8c4d6' d='M6 8.5L1.5 4h9L6 8.5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+select.field option {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* ── Switch toggle ── */
+
+.switch-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.switch-row strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.switch-row span {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.switch {
+  width: 44px;
+  height: 26px;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.switch::before {
+  content: "";
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.16s ease;
+}
+
+.switch.on { background: var(--accent-green); }
+.switch.on::before { transform: translateX(18px); }
+
+/* ── Back button ── */
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin-bottom: 14px;
+  border: none;
+  background: none;
+  color: var(--accent-cyan);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity var(--transition);
+}
+
+.back-btn:hover { opacity: 0.7; }
+
+/* ── Confirmation flash ── */
+
+.flash {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--accent-green);
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  z-index: 100;
+}
+
+.flash.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── Spinner for processing states ── */
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

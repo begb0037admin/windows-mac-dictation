@@ -6,16 +6,10 @@ The model is loaded once and cached for the life of the process. First call
 downloads model weights (hundreds of MB to a few GB) via huggingface_hub,
 which prints its own progress bar — nothing to hang silently here.
 
-`transcribe()` accepts either a mono float32 numpy array (live dictation —
-already the right sample rate) or a file path string/Path (the "Transcribe
-File" feature — an arbitrary audio file). For a file path, the path is
-handed straight to the whisper backend, which decodes it itself:
-faster-whisper via the bundled PyAV library (no extra install), mlx-whisper
-by shelling out to a system `ffmpeg` (Mac only — needs `brew install
-ffmpeg`, a prerequisite live dictation doesn't have).
+`transcribe()` accepts a mono float32 numpy array (live dictation, already
+at the correct sample rate). File transcription is handled separately by
+the meeting-transcriber tool.
 """
-
-from pathlib import Path
 
 import numpy as np
 
@@ -68,14 +62,10 @@ def _get_model(whisper_config):
 
 
 def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
-    """Transcribe to text. `audio` is either a mono float32 numpy array
-    (live dictation) or a file path string/Path (an arbitrary audio file)."""
+    """Transcribe a mono float32 numpy array to text."""
     model = _get_model(whisper_config)
 
-    if isinstance(audio, (str, Path)):
-        audio_input = str(audio)
-    else:
-        audio_input = audio.reshape(-1).astype(np.float32)
+    audio_input = audio.reshape(-1).astype(np.float32)
 
     if _backend == "faster-whisper":
         segments, _info = model.transcribe(audio_input, language="en")

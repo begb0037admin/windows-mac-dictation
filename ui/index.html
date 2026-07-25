@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dictation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app state-idle" id="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">D</span>
+        <span>Dictation</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="btnSettings" type="button" title="Settings" aria-label="Settings">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="8" r="2.5"/>
+            <path d="M8 1.5v1.25M8 13.25v1.25M1.5 8h1.25M13.25 8h1.25M3.4 3.4l.88.88M11.72 11.72l.88.88M3.4 12.6l.88-.88M11.72 4.28l.88-.88"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Flash notification -->
+    <div class="flash" id="flash"></div>
+
+    <!-- Main content -->
+    <div class="content">
+
+      <!-- Dictation View -->
+      <div class="view active" id="viewDictation">
+
+        <!-- Hotkey badge -->
+        <div class="hotkey-badge" id="hotkeyLabel" data-idle-text="Hold hotkey to record">
+          Hold <span class="key" id="hotkeyKey">...</span>
+        </div>
+
+        <!-- Status -->
+        <div class="status-indicator">
+          <span class="status-dot"></span>
+          <span id="statusText">Initialising...</span>
+        </div>
+
+        <!-- Waveform -->
+        <div class="waveform-container" id="waveform"></div>
+
+        <!-- Live caption -->
+        <div class="caption-panel">
+          <strong class="caption-label">Live transcript</strong>
+          <div class="caption-text" id="captionText">
+            <span class="caption-placeholder">Waiting for speech...</span>
+          </div>
+        </div>
+
+        <!-- Status cells -->
+        <div class="status-grid">
+          <div class="status-cell" id="cellCapture">
+            <strong>Capture</strong>
+            <span>Ready</span>
+          </div>
+          <div class="status-cell" id="cellWhisper">
+            <strong>Whisper</strong>
+            <span>Local</span>
+          </div>
+          <div class="status-cell" id="cellCleanup">
+            <strong>Cleanup</strong>
+            <span>Ollama</span>
+          </div>
+          <div class="status-cell" id="cellPaste">
+            <strong>Paste</strong>
+            <span>At cursor</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings View -->
+      <div class="view" id="viewSettings">
+        <button class="back-btn" id="btnBack" type="button">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 2L4 7l5 5"/>
+          </svg>
+          Back to Dictation
+        </button>
+
+        <div class="settings">
+          <!-- Hotkey & backend (read-only, restart required) -->
+          <div class="settings-section">
+            <h3>Input</h3>
+            <div class="field-row">
+              <label for="settingHotkey">Hotkey</label>
+              <input class="field" id="settingHotkey" readonly>
+              <span class="hint">Edit config.json and restart to change</span>
+            </div>
+            <div class="field-row">
+              <label for="settingBackend">Whisper backend</label>
+              <input class="field" id="settingBackend" readonly>
+              <span class="hint">Platform-specific, set in config.json</span>
+            </div>
+          </div>
+
+          <!-- Cleanup model (editable) -->
+          <div class="settings-section">
+            <h3>Cleanup</h3>
+            <div class="field-row">
+              <label for="settingCleanupModel">Ollama model</label>
+              <input class="field" id="settingCleanupModel" placeholder="e.g. llama3.2:3b">
+              <span class="hint">The local Ollama model used to clean up transcripts</span>
+            </div>
+          </div>
+
+          <!-- Run on login -->
+          <div class="switch-row">
+            <div>
+              <strong>Run on login</strong>
+              <span>Start dictation when you log in (not yet implemented)</span>
+            </div>
+            <button class="switch" id="settingAutostart" type="button" aria-label="Toggle run on login" aria-pressed="false"></button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -3,11 +3,10 @@ Full MVP pipeline: push-to-talk hotkey + audio capture + transcription +
 Ollama cleanup + clipboard paste injection. Cross-platform (Windows + macOS)
 via pynput, sounddevice, transcribe.py, cleanup.py, and inject.py.
 
-This is a normal, always-visible app window (not a system tray utility).
-The window shows live status and a live-updating partial transcript while
-you hold the hotkey, purely for feedback that it's hearing you — the real
-text only gets pasted into whatever app has focus once, cleanly, on
-release. Closing the window quits the app.
+UI is a pywebview window rendering ui/index.html — a dark-themed web UI
+with a live-updating waveform and partial transcript while you hold the
+hotkey, purely for feedback. The real text only gets pasted into whatever
+app has focus once, cleanly, on release. Closing the window quits the app.
 
 Hold the hotkey (Right Ctrl on Windows, Right Option on Mac by default),
 speak, release.
@@ -19,17 +18,17 @@ Without it, pynput silently receives no key events, and pyautogui's paste
 keystroke silently does nothing.
 """
 
+import json
 import os
 import platform
 import sys
 import threading
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox
 
 import numpy as np
 import pyperclip
 import sounddevice as sd
+import webview
 from pynput import keyboard
 
 from cleanup import cleanup
@@ -37,14 +36,11 @@ from config import load_config
 from inject import inject
 from transcribe import transcribe
 
-AUDIO_FILETYPES = [
-    ("Audio files", "*.wav *.mp3 *.m4a *.flac *.ogg *.aac"),
-    ("All files", "*.*"),
-]
-
 config = load_config()
 SAMPLE_RATE = config["sample_rate"]
 HOTKEY_NAME = config["hotkey"]
+
+UI_DIR = Path(__file__).parent / "ui"
 
 
 def resolve_hotkey(name):
@@ -61,7 +57,7 @@ def resolve_hotkey(name):
 
 HOTKEY = resolve_hotkey(HOTKEY_NAME)
 HOTKEY_DISPLAY = HOTKEY_NAME.replace("_r", " (right)").replace("_l", " (left)").replace("_", " ").title()
-IDLE_STATUS = f"Idle — hold {HOTKEY_DISPLAY} to record"
+IDLE_STATUS = f"Hold {HOTKEY_DISPLAY} to record"
 
 state_lock = threading.Lock()
 transcribe_lock = threading.Lock()
@@ -69,29 +65,95 @@ recording = False
 frames = []
 stream = None
 partial_stop_event = None
-file_processing = False
 
-root = None
-status_label = None
-text_box = None
-file_button = None
+window = None  # pywebview window reference
 
 
-def set_status(text):
-    if root:
-        root.after(0, lambda: status_label.config(text=text))
+# ── UI bridge ──
+
+def push_js(js_code):
+    """Safely evaluate JS in the webview window."""
+    if window:
+        try:
+            window.evaluate_js(js_code)
+        except Exception:
+            pass  # Window may be closing
 
 
-def set_text(text):
-    if root:
-        def _update():
-            text_box.config(state="normal")
-            text_box.delete("1.0", "end")
-            text_box.insert("1.0", text)
-            text_box.config(state="disabled")
+def push_status(state, text):
+    """Push a state change to the frontend."""
+    safe_text = json.dumps(text)
+    push_js(f"updateStatus({json.dumps(state)}, {safe_text})")
 
-        root.after(0, _update)
 
+def push_transcript(text):
+    """Push transcript text to the frontend."""
+    push_js(f"updateTranscript({json.dumps(text)})")
+
+
+def push_final_text(text):
+    """Push the final cleaned text to the frontend."""
+    push_js(f"updateFinalText({json.dumps(text)})")
+
+
+def push_audio_level(rms):
+    """Push an audio RMS level to the frontend waveform."""
+    push_js(f"updateAudioLevel({rms:.4f})")
+
+
+class DictationAPI:
+    """Exposed to JavaScript via pywebview's js_api bridge."""
+
+    def get_config(self):
+        """Return current config for the settings panel."""
+        whisper_cfg = config["whisper"]
+        backend_name = whisper_cfg.get("backend", "unknown")
+        model_size = whisper_cfg.get("model_size", "unknown")
+
+        if backend_name == "faster-whisper":
+            device = whisper_cfg.get("device", "cpu")
+            compute = whisper_cfg.get("compute_type", "")
+            backend_display = f"faster-whisper {model_size} {device} {compute}".strip()
+        elif backend_name == "mlx-whisper":
+            backend_display = f"mlx-whisper {model_size} Metal"
+        else:
+            backend_display = f"{backend_name} {model_size}"
+
+        return {
+            "hotkey": HOTKEY_DISPLAY,
+            "whisper_backend": backend_display,
+            "cleanup_model": config["cleanup"].get("ollama_model", ""),
+            "autostart": config.get("autostart", False),
+        }
+
+    def save_config(self, data):
+        """Save editable settings to config.json."""
+        config_path = Path(__file__).parent / "config.json"
+        try:
+            with open(config_path, "r") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = {}
+
+        # Update editable fields
+        if "cleanup_model" in data and data["cleanup_model"]:
+            if "cleanup" not in raw:
+                raw["cleanup"] = {}
+            raw["cleanup"]["ollama_model"] = data["cleanup_model"]
+            # Also update the in-memory config
+            config["cleanup"]["ollama_model"] = data["cleanup_model"]
+
+        if "autostart" in data:
+            raw["autostart"] = data["autostart"]
+            config["autostart"] = data["autostart"]
+
+        with open(config_path, "w") as f:
+            json.dump(raw, f, indent=2)
+
+        return True
+
+
+# ── Audio ──
 
 def audio_callback(indata, frame_count, time_info, status):
     if status:
@@ -99,6 +161,9 @@ def audio_callback(indata, frame_count, time_info, status):
     with state_lock:
         if recording:
             frames.append(indata.copy())
+            # Compute RMS for the waveform
+            rms = float(np.sqrt(np.mean(indata ** 2)))
+            push_audio_level(rms)
 
 
 PARTIAL_INTERVAL_SECONDS = 0.8
@@ -138,7 +203,7 @@ def partial_transcription_loop(stop_event):
 
         display_text = f"{finalized_text} {partial_text}".strip()
         if display_text:
-            set_text(display_text)
+            push_transcript(display_text)
 
         if len(chunk_audio) >= CHUNK_SECONDS * SAMPLE_RATE:
             finalized_text = display_text
@@ -148,14 +213,12 @@ def partial_transcription_loop(stop_event):
 def start_recording():
     global recording, frames, stream, partial_stop_event
     with state_lock:
-        if recording or file_processing:
+        if recording:
             return
         recording = True
         frames = []
-    if root:
-        root.after(0, lambda: file_button.config(state="disabled"))
-    set_status("Listening...")
-    set_text("")
+    push_status("recording", "Listening...")
+    push_transcript("")
     print("[rec] recording started")
     stream = sd.InputStream(
         samplerate=SAMPLE_RATE,
@@ -188,7 +251,7 @@ def stop_recording():
 
     if not captured:
         print("[rec] recording stopped — no audio captured")
-        set_status(IDLE_STATUS)
+        push_status("idle", IDLE_STATUS)
         return
 
     audio = np.concatenate(captured, axis=0)
@@ -198,18 +261,18 @@ def stop_recording():
         f"{duration_s:.2f}s captured at {SAMPLE_RATE}Hz"
     )
 
-    set_status("Transcribing...")
+    push_status("transcribing", "Transcribing...")
     try:
         with transcribe_lock:
             text = transcribe(audio, SAMPLE_RATE, config["whisper"])
         print(f"[transcribe] result: {text!r}")
     except Exception as exc:
         print(f"[transcribe] failed: {exc}", file=sys.stderr)
-        set_status(f"Transcription failed: {exc}")
+        push_status("error", f"Transcription failed: {exc}")
         return
 
-    set_text(text)
-    set_status("Cleaning up...")
+    push_transcript(text)
+    push_status("cleanup", "Cleaning up...")
     try:
         cleaned = cleanup(text, config["cleanup"])
         print(f"[cleanup] result: {cleaned!r}")
@@ -218,80 +281,18 @@ def stop_recording():
         print("[cleanup] falling back to the raw transcript for injection")
         cleaned = text
 
-    set_text(cleaned)
-    set_status("Pasting...")
+    push_final_text(cleaned)
+    push_status("pasting", "Pasting...")
     try:
         inject(cleaned)
-        set_status(IDLE_STATUS)
+        # Brief pause to show the pasted state, then return to idle
+        threading.Timer(1.5, lambda: push_status("idle", IDLE_STATUS)).start()
     except Exception as exc:
         print(f"[inject] failed: {exc}", file=sys.stderr)
-        set_status(f"Paste failed: {exc}")
-
-    if root:
-        root.after(0, lambda: file_button.config(state="normal"))
+        push_status("error", f"Paste failed: {exc}")
 
 
-def choose_audio_file():
-    """Transcribe File feature: pick an existing audio file and run it
-    through the same transcribe -> cleanup pipeline as live dictation.
-    Result is copied to the clipboard, shown in the window, and saved as a
-    .txt file next to the audio file. Does not paste anywhere."""
-    if recording or file_processing:
-        return
-    path = filedialog.askopenfilename(
-        title="Choose an audio file to transcribe", filetypes=AUDIO_FILETYPES
-    )
-    if not path:
-        return
-
-    global file_processing
-    file_processing = True
-    file_button.config(state="disabled")
-    set_status(f"Transcribing {Path(path).name}...")
-    set_text("")
-    threading.Thread(target=_process_audio_file, args=(path,), daemon=True).start()
-
-
-def _process_audio_file(path):
-    global file_processing
-    try:
-        with transcribe_lock:
-            text = transcribe(path, SAMPLE_RATE, config["whisper"])
-        print(f"[transcribe:file] result: {text!r}")
-    except Exception as exc:
-        print(f"[transcribe:file] failed: {exc}", file=sys.stderr)
-        set_status(f"Transcription failed: {exc}")
-        if root:
-            root.after(0, lambda: messagebox.showerror("Transcription failed", str(exc)))
-        file_processing = False
-        if root:
-            root.after(0, lambda: file_button.config(state="normal"))
-        return
-
-    set_status("Cleaning up...")
-    try:
-        cleaned = cleanup(text, config["cleanup"])
-        print(f"[cleanup:file] result: {cleaned!r}")
-    except Exception as exc:
-        print(f"[cleanup:file] failed: {exc}", file=sys.stderr)
-        print("[cleanup:file] falling back to the raw transcript")
-        cleaned = text
-
-    txt_path = Path(path).with_suffix(".txt")
-    try:
-        txt_path.write_text(cleaned, encoding="utf-8")
-        save_note = f"Saved to {txt_path.name}."
-    except Exception as exc:
-        save_note = f"Could not save .txt file: {exc}"
-
-    pyperclip.copy(cleaned)
-    set_text(cleaned)
-    set_status(f"Copied to clipboard. {save_note}")
-
-    file_processing = False
-    if root:
-        root.after(0, lambda: file_button.config(state="normal"))
-
+# ── Hotkey ──
 
 def on_press(key):
     if key == HOTKEY:
@@ -300,7 +301,7 @@ def on_press(key):
 
 def on_release(key):
     if key == HOTKEY:
-        stop_recording()
+        threading.Thread(target=stop_recording, daemon=True).start()
 
 
 def run_hotkey_listener():
@@ -309,13 +310,22 @@ def run_hotkey_listener():
     return listener
 
 
-def on_close():
-    root.destroy()
+# ── Window lifecycle ──
+
+def on_window_loaded():
+    """Called once the webview window has loaded the HTML."""
+    # Set the hotkey display
+    push_js(f"setHotkeyDisplay({json.dumps(HOTKEY_NAME)}, {json.dumps(HOTKEY_DISPLAY)})")
+    push_status("idle", IDLE_STATUS)
+
+
+def on_window_closing():
+    """Called when the window is about to close."""
     os._exit(0)
 
 
 def main():
-    global root, status_label, text_box
+    global window
 
     try:
         sd.check_input_settings(samplerate=SAMPLE_RATE, channels=1)
@@ -350,24 +360,20 @@ def main():
 
     run_hotkey_listener()
 
-    global file_button
-    root = tk.Tk()
-    root.title("Dictation")
-    root.geometry("480x320")
-    root.protocol("WM_DELETE_WINDOW", on_close)
-
-    status_label = tk.Label(root, text=IDLE_STATUS, font=("Segoe UI", 12))
-    status_label.pack(pady=(16, 8))
-
-    file_button = tk.Button(
-        root, text="Transcribe File...", command=choose_audio_file
+    api = DictationAPI()
+    window = webview.create_window(
+        "Dictation",
+        url=str(UI_DIR / "index.html"),
+        js_api=api,
+        width=480,
+        height=520,
+        min_size=(380, 420),
     )
-    file_button.pack(pady=(0, 8))
 
-    text_box = tk.Text(root, wrap="word", height=10, state="disabled")
-    text_box.pack(fill="both", expand=True, padx=12, pady=12)
+    window.events.loaded += on_window_loaded
+    window.events.closing += on_window_closing
 
-    root.mainloop()
+    webview.start()
 
 
 if __name__ == "__main__":

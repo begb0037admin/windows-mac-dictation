@@ -123,7 +123,7 @@ After Steps 1–4 were built and confirmed working (tray icon + background utili
 - This actually **simplifies** a real cross-platform risk that would otherwise exist: a persistent tray icon (needs the main thread on macOS) and a tkinter window (also wants the main thread on macOS, being a Cocoa-backed Tk build) would compete for the same thread. Dropping the tray icon removes that conflict — tkinter now cleanly owns the main thread on both platforms.
 - Re-transcribing the whole growing buffer every ~1.5s (rather than true incremental/streaming ASR) is a deliberate simplicity-over-efficiency tradeoff — fine for short chat-length dictations on the target hardware (RTX 3070 / Apple Silicon), avoids the much larger complexity of real streaming transcription.
 
-**"Transcribe File" feature — scoped then built (2026-07-09):** upload an existing audio file, run it through the same transcribe → cleanup pipeline, output to all three of: clipboard, on-screen display, and a `.txt` file saved next to the audio file. Added as a button in the same window (no separate process needed — with no tray icon, there's only ever one tkinter root, so the earlier "give it its own process to dodge a main-thread conflict" plan wasn't necessary). `transcribe()` was extended to accept a file path directly, handed straight to the whisper backend for its own decoding — faster-whisper via its bundled PyAV library (no extra install), mlx-whisper by shelling out to a system `ffmpeg` binary, **which is a new Mac-only prerequisite** (`brew install ffmpeg`) that live dictation doesn't need, since live audio already arrives as a ready-made array.
+**"Transcribe File" feature — removed (2026-07-25).** This feature was scoped and built during the 2026-07-09 session but has been removed per the project brief split: `windows-dictation` is for live push-to-talk dictation only, file transcription belongs to `meeting-transcriber`. The code (`choose_audio_file()`, `_process_audio_file()`, file-path branch in `transcribe.py`) was deleted. The `ffmpeg` Mac-only prerequisite that this feature required is no longer needed.
 
 ## 12. Amendment — distribution to colleagues, raised 2026-07-09
 
@@ -132,3 +132,29 @@ Kevin wants to give this to colleagues, which needs an installer for both platfo
 2. **GPU assumption doesn't hold for other users** — `config.json`'s Windows `whisper` section hardcodes `device: cuda`; colleagues without an NVIDIA GPU need a CPU fallback that doesn't exist yet.
 
 Deferred until the app itself is fully stable and tested (packaging a moving target means repackaging repeatedly).
+
+## 13. Amendment — pywebview UI rework, 2026-07-25
+
+The tkinter window (a basic status label + text box, with a "Transcribe File" button that was removed in this same session) has been replaced with a web-based UI rendered in a native window via `pywebview`. This was prompted by Kevin's HTML mockup showing a much richer interface inspired by Wispr and Eloquent.
+
+**What changed:**
+- `tkinter` dropped entirely — no more `tk.Tk()`, `tk.Label`, `tk.Text`, `tk.Button`.
+- `pywebview` added — creates a native window (Edge WebView2 on Windows, WebKit on Mac) that renders HTML/CSS/JS. Lightweight, no Electron bloat. Added to `requirements.txt`.
+- New `ui/` directory: `index.html`, `styles.css`, `app.js` — the actual UI.
+- `main.py` rewritten to use `webview.create_window()` + a `DictationAPI` class (exposed to JS via `js_api`). All Python backend logic (hotkey, audio, transcribe, cleanup, inject) preserved line-for-line.
+
+**UI features:**
+- Dark theme (`#111827` base) with gradient accents and glassmorphism panels.
+- Real-time animated waveform (42 bars) driven by actual microphone RMS levels from the Python `audio_callback`.
+- Live partial transcript area with auto-scroll and a cyan label.
+- Pipeline status cells (Capture / Whisper / Cleanup / Paste) that highlight as each stage runs.
+- Hotkey badge showing the configured key.
+- Two-view layout: Dictation (default) and Settings (toggled via gear icon).
+- Settings panel: read-only display of hotkey and whisper backend (edit config.json to change), editable Ollama cleanup model, run-on-login toggle.
+- State machine with distinct visual states: idle, recording, transcribing, cleaning up, pasting, error — each with different colours, animations, and status text.
+- Confirmation flash ("✓ Pasted") on successful paste.
+
+**Communication bridge:** Python pushes state updates to JS via `window.evaluate_js()` (status, transcript text, audio levels). JS calls Python via `pywebview.api.*` (settings read/write).
+
+**Why pywebview over alternatives:** `pywebview` is a thin wrapper around the OS's native webview engine — no bundled browser, no Electron overhead, just HTML/CSS/JS in a native window. This gives the rich UI of a web app (matching Kevin's mockup) with the lightweight footprint of a desktop utility. The Python backend doesn't change at all; the webview is purely a display layer.
+
