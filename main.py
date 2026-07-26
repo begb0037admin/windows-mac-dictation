@@ -57,6 +57,8 @@ def resolve_hotkey(name):
 
 HOTKEY = resolve_hotkey(HOTKEY_NAME)
 HOTKEY_DISPLAY = HOTKEY_NAME.replace("_r", " (right)").replace("_l", " (left)").replace("_", " ").title()
+if platform.system() == "Darwin":
+    HOTKEY_DISPLAY = HOTKEY_DISPLAY.replace("Alt", "Option")
 IDLE_STATUS = f"Hold {HOTKEY_DISPLAY} to record"
 
 state_lock = threading.Lock()
