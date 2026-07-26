@@ -273,6 +273,81 @@ function init() {
   // Set initial state
   updateStatus('idle', 'Initialising...');
   updateTranscript('');
+
+  // Standalone preview: if no pywebview bridge after 500ms, run demo mode
+  setTimeout(() => {
+    if (!window.pywebview || !window.pywebview.api) {
+      runDemoMode();
+    }
+  }, 500);
+}
+
+// ── Demo mode (standalone browser preview) ──
+
+function runDemoMode() {
+  console.log('[demo] No pywebview bridge detected — running in preview mode');
+
+  // Set demo hotkey display
+  const isMac = navigator.platform.toUpperCase().includes('MAC');
+  const hotkeyDisplay = isMac ? 'Right Option' : 'Right Ctrl';
+  setHotkeyDisplay('', hotkeyDisplay);
+  updateStatus('idle', `Hold ${hotkeyDisplay} to record`);
+
+  // Fill settings with demo values
+  dom.settingHotkey.value = hotkeyDisplay;
+  dom.settingBackend.value = isMac ? 'mlx-whisper small Metal' : 'faster-whisper small cuda float16';
+  dom.settingCleanupModel.value = 'llama3.2:3b';
+
+  // Demo cycle: walk through all states so the user can see the UI
+  const demoText = 'I think the right approach is to keep live dictation focused and local, and move uploaded meeting files into the separate meeting transcriber tool.';
+
+  setTimeout(() => {
+    // Recording state
+    updateStatus('recording', 'Listening...');
+    updateTranscript('');
+
+    // Simulate waveform with random levels
+    let waveInterval = setInterval(() => {
+      if (currentState !== 'recording') {
+        clearInterval(waveInterval);
+        return;
+      }
+      updateAudioLevel(Math.random() * 0.4 + 0.05);
+    }, 80);
+
+    // Simulate partial transcript building up
+    const words = demoText.split(' ');
+    let wordIndex = 0;
+    let partialInterval = setInterval(() => {
+      if (wordIndex >= words.length || currentState !== 'recording') {
+        clearInterval(partialInterval);
+        return;
+      }
+      wordIndex += 2;
+      updateTranscript(words.slice(0, wordIndex).join(' '));
+    }, 400);
+
+    // After 4s, transition through pipeline stages
+    setTimeout(() => {
+      clearInterval(waveInterval);
+      clearInterval(partialInterval);
+      updateTranscript(demoText);
+      updateStatus('transcribing', 'Transcribing...');
+
+      setTimeout(() => {
+        updateStatus('cleanup', 'Cleaning up...');
+
+        setTimeout(() => {
+          updateFinalText(demoText);
+          updateStatus('pasting', 'Pasting...');
+
+          setTimeout(() => {
+            updateStatus('idle', `Hold ${hotkeyDisplay} to record`);
+          }, 1500);
+        }, 1200);
+      }, 1500);
+    }, 4000);
+  }, 1000);
 }
 
 // Wait for DOM
