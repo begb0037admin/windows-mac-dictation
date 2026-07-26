@@ -1,7 +1,34 @@
 # windows-dictation — Living Handover Document
 
-**Last updated:** 2026-07-25 — pywebview UI rework + file-transcription trim
-**Status:** Steps 1–4 + live-caption rework confirmed on both platforms. UI reworked from tkinter to pywebview (dark-themed web UI with animated waveform, live transcript, status cells, settings panel). "Transcribe File" feature removed — file transcription belongs to `meeting-transcriber`. Outstanding: Mac retest after UI rework, Step 5 (run on login), real Teams test, packaging (deferred).
+> See also: `ARCHITECTURE.md` (current-state component/threading/state-machine reference), `docs/BUILD_BRIEF.md` (build history and amendment rationale), `CLAUDE.md` (bootstrap/hard rules).
+
+**Last updated:** 2026-07-26 — compact review UI, Pill mode, frameless/vibrancy window (logged this session); documentation audit and refresh
+**Status:** Steps 1–4 + live-caption rework confirmed on both platforms (as of 2026-07-25). A further UI rework landed today (2026-07-26) — editable review step (Enter to send / Esc to dismiss), Pill/mini-bar mode, frameless transparent/vibrancy window, theme/opacity settings — **not yet tested on either platform**. Outstanding: retest both platforms against the new UI, Step 5 (run on login), a real Teams test, packaging (deferred).
+
+---
+
+## Session 2026-07-26 — Compact review UI, Pill mode, frameless/vibrancy window (logged retroactively); documentation audit
+
+**Part A — six commits from earlier today, not previously logged.** Between this file's last entry (2026-07-25, commit `a5d1a82`) and this session, six commits landed that reworked the UI further without a HANDOVER entry or BUILD_BRIEF amendment. Logged now for the record, per `CONSTITUTION.md` §5 (documentation permanence — undocumented work is debt):
+
+1. `763cecf` — **Mac hotkey default fixed:** `alt_r` (Right Option) → `alt_l` (Left Option). Standard Apple keyboards have no physical Right Option key, so the previous default was unusable as shipped. Display label also corrected to show "Option" rather than "Alt" on Mac.
+2. `81cb1cd` — **Standalone demo mode** added to `app.js` (`runDemoMode()`): when no `pywebview` bridge is present (i.e. `ui/index.html` opened directly in a browser), the UI runs a scripted fake dictation so the interface can be previewed/designed without the Python backend. Dev convenience only, not part of the real pipeline.
+3. `1e4237f` — **Compact UI + editable review step.** The transcript area is now editable (`contenteditable`) once cleanup finishes; a new `review` state was added to the state machine (between `cleanup` and `pasting`) with Send/Dismiss buttons and Enter/Esc keyboard shortcuts. **This changes the documented behavior in `docs/BUILD_BRIEF.md` §11 and this file's earlier sessions** — the pipeline no longer pastes automatically on release; it now stops and waits for explicit confirmation. Settings gained hotkey/theme fields.
+4. `1e214d4` — **Pill/mini-bar mode** added: a compact 260×44 bar view, toggled via a new button, backed by a real window resize (`DictationAPI.set_window_size`). Window opacity/glass controls (`solid`/`glass`/`translucent`) added to Settings. The cleanup-model field in Settings is now greyed out (read-only via UI, config.json-only).
+5. `8f0d7d0` — **Frameless, transparent window.** `webview.create_window()` now passes `frameless=True`, `transparent=True`, `easy_drag=False` — no native title bar or OS close button; a custom close button in the UI calls the new `close_window()` bridge method.
+6. `76bee48` — **Native macOS Vibrancy** (`vibrancy=True`, backed by `NSVisualEffectView`) for the glassmorphism look from Kevin's original mockup.
+
+**None of this has been tested yet on Windows or Mac** — same "built, not confirmed" state as every other session in this file before Kevin runs it. Two things specifically worth testing given what changed: (1) whether `vibrancy`/`transparent` render sensibly on Windows' WebView2, since that pywebview feature is documented as macOS-oriented, and (2) the corrected Mac hotkey.
+
+**Part B — documentation audit and refresh (this session).** Read every doc in the repo (`CLAUDE.md`, `CONSTITUTION.md`, `AGENT_MODEL.md`, this file, `README.md`, `docs/BUILD_BRIEF.md`) plus all source files, per a documentation audit request. Findings and changes:
+- Added `ARCHITECTURE.md` — this repo had no single current-state architecture reference; the component table was duplicated across README/CLAUDE.md/HANDOVER with no owner, and (per Part A) had drifted out of date regardless.
+- Removed this file's trailing `## Architecture` / `## Key Constraints` / `## Next Action` section (unstructured leftover from the very first commit of this file) — it still described Steps 3–5 as "not yet built," directly contradicting the status block at the top of this same file. Fully superseded by `ARCHITECTURE.md` and `CLAUDE.md`; nothing unique was lost.
+- Closed the rename flag raised in the "Cross-platform pivot" session below: the GitHub repo is now `begb0037admin/windows-mac-dictation` (the old `windows-dictation` name still resolves via GitHub's redirect). Current-state docs (`CLAUDE.md`, `README.md`, `ARCHITECTURE.md`) now reference the current name; the historical entries in this file are left exactly as written, since they were accurate at the time.
+- `docs/BUILD_BRIEF.md` gained §14 recording Part A's UI changes, in keeping with its existing amendment pattern (§10–13).
+- `README.md`'s status checklist, hotkey default, and "How it works" step 6 (paste-on-release) corrected to match the current pipeline; added a Documentation section cross-linking every doc, and a License note (private/internal, no license granted).
+- Did not create TESTING.md, DECISIONS.md, API_REFERENCE.md, RELEASE.md, or CHANGELOG.md — flagged as premature for a solo-developer MVP tool with no test suite, no release process, and no public API. Recommend revisiting once packaging (`docs/BUILD_BRIEF.md` §12) is actually underway.
+
+**Next action:** Kevin (or Hope) tests today's UI rework end-to-end on both platforms — specifically the review/Send/Dismiss flow, Pill mode resize, and the frameless/vibrancy window on Windows. Once confirmed, revisit Step 5 (run on login) and the packaging/GPU-fallback questions.
 
 ---
 
@@ -244,20 +271,6 @@ Kevin confirmed after Step 1 was first built (Windows-only) that this needs to b
 
 ---
 
-## Architecture
+## Architecture and Key Constraints
 
-| Component | Description |
-|---|---|
-| `docs/BUILD_BRIEF.md` | Original build brief — source of truth for scope, architecture, and MVP order |
-| `main.py` | Tray app entry point, hotkey listener, audio capture |
-| `config.py` / `config.json` | Hotkey, model, and backend configuration |
-| `transcribe.py` | faster-whisper wrapper (not yet built — Step 3) |
-| `cleanup.py` | Ollama cleanup call (not yet built — Step 4) |
-| `inject.py` | Clipboard + paste injection (not yet built — Step 5) |
-
-## Key Constraints
-- This is a **local Windows app** — it needs a mic, a global hotkey listener, and (ideally) Kevin's RTX 3070 GPU. Claude Code cannot run or test it directly; code is written and pushed to GitHub, then run and verified by Kevin on the admin machine.
-- Build order is sequential and gated: each MVP checklist item (`docs/BUILD_BRIEF.md` §4) is tested manually on Kevin's machine before the next is built.
-
-## Next Action
-Build Step 1 of the MVP: `main.py` with tray icon + CapsLock push-to-talk hotkey + audio capture to memory (no transcription yet). Kevin runs it locally and confirms the hotkey triggers recording start/stop correctly before Step 2 (transcription) is built.
+Moved to `ARCHITECTURE.md` (current component/threading/state-machine reference) and `CLAUDE.md` (hard rules/key constraints) — this section was leftover from this file's first commit and had gone stale (it still listed Steps 3–5 as "not yet built" long after they shipped, contradicting the status block at the top of this file). Removed 2026-07-26 as part of the documentation audit; see the session entry above — nothing here was unique, everything is preserved in `ARCHITECTURE.md`/`CLAUDE.md`/`docs/BUILD_BRIEF.md`.
