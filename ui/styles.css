@@ -62,13 +62,31 @@ body {
   -webkit-user-select: none;
 }
 
+/* ── Opacity & Glassmorphism Modes ── */
+.app.opacity-solid {
+  background: var(--bg) !important;
+}
+
+.app.opacity-glass {
+  background: var(--gradient-bg), var(--bg);
+  backdrop-filter: blur(12px);
+}
+
+.app.opacity-translucent {
+  background: rgba(17, 24, 39, 0.75);
+  backdrop-filter: blur(8px);
+}
+
+.theme-light.app.opacity-translucent {
+  background: rgba(240, 244, 248, 0.85);
+}
+
 /* ── Layout ── */
 
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--gradient-bg), var(--bg);
 }
 
 /* ── Header ── */
@@ -141,6 +159,12 @@ body {
   background: rgba(141, 216, 255, 0.1);
 }
 
+.icon-btn.mini {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
 /* ── Main content ── */
 
 .content {
@@ -155,6 +179,55 @@ body {
 
 .view { display: none; }
 .view.active { display: flex; flex-direction: column; flex: 1; }
+
+/* ── Pill / Mini Bar Mode ── */
+
+.app.mode-pill .header { display: none; }
+.app.mode-pill .content { padding: 0; flex: 1; }
+.app.mode-pill #viewDictation,
+.app.mode-pill #viewSettings { display: none !important; }
+.app.mode-pill #viewPill { display: flex !important; height: 100%; }
+
+.pill-bar {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0 10px;
+  gap: 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  -webkit-app-region: drag;
+}
+
+.pill-hotkey {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.pill-waveform {
+  flex: 1;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.pill-waveform .wave-bar {
+  flex: 1;
+  height: 6px;
+  min-height: 3px;
+}
+
+.pill-bar .icon-btn {
+  -webkit-app-region: no-drag;
+}
 
 /* ── Status row (compact) ── */
 
@@ -373,7 +446,7 @@ body {
   font-style: italic;
 }
 
-/* ── Action bar (send / dismiss) ── */
+/* ── Action bar ── */
 
 .action-bar {
   display: none;
@@ -464,7 +537,6 @@ body {
   color: var(--accent-green);
 }
 
-/* Hide status grid at small sizes */
 @media (max-height: 350px) {
   .status-grid { display: none; }
 }
@@ -529,7 +601,7 @@ body {
   box-shadow: 0 0 0 2px rgba(141, 216, 255, 0.12);
 }
 
-.field:disabled {
+.field:disabled, .field[readonly] {
   opacity: 0.5;
   cursor: not-allowed;
 }

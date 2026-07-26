@@ -7,15 +7,20 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app state-idle" id="app">
+  <div class="app state-idle opacity-glass" id="app">
 
     <!-- Header -->
-    <header class="header">
+    <header class="header" id="appHeader">
       <div class="brand">
         <span class="brand-mark">D</span>
         <span>Dictation</span>
       </div>
       <div class="header-actions">
+        <button class="icon-btn" id="btnPill" type="button" title="Mini Bar Mode" aria-label="Mini Bar Mode">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="5" width="10" height="4" rx="2"/>
+          </svg>
+        </button>
         <button class="icon-btn" id="btnSettings" type="button" title="Settings" aria-label="Settings">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="8" cy="8" r="2.5"/>
@@ -29,9 +34,9 @@
     <div class="flash" id="flash"></div>
 
     <!-- Main content -->
-    <div class="content">
+    <div class="content" id="appContent">
 
-      <!-- Dictation View -->
+      <!-- Dictation View (Full Mode) -->
       <div class="view active" id="viewDictation">
 
         <!-- Status row: hotkey badge + status -->
@@ -96,6 +101,20 @@
         </div>
       </div>
 
+      <!-- Pill View (Mini Bar Mode) -->
+      <div class="view" id="viewPill">
+        <div class="pill-bar">
+          <span class="status-dot"></span>
+          <span class="pill-hotkey" id="pillHotkey">Option</span>
+          <div class="pill-waveform" id="pillWaveform"></div>
+          <button class="icon-btn mini" id="btnExpand" type="button" title="Expand Window" aria-label="Expand Window">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 10L10 2M10 2H4M10 2V8"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <!-- Settings View -->
       <div class="view" id="viewSettings">
         <button class="back-btn" id="btnBack" type="button">
@@ -106,13 +125,24 @@
         </button>
 
         <div class="settings">
-          <!-- Theme toggle -->
-          <div class="switch-row">
-            <div>
-              <strong>Light theme</strong>
-              <span>Switch between dark and light appearance</span>
+          <!-- Appearance -->
+          <div class="settings-section">
+            <h3>Appearance</h3>
+            <div class="switch-row">
+              <div>
+                <strong>Light theme</strong>
+                <span>Switch between dark and light appearance</span>
+              </div>
+              <button class="switch" id="settingTheme" type="button" aria-label="Toggle light theme" aria-pressed="false"></button>
             </div>
-            <button class="switch" id="settingTheme" type="button" aria-label="Toggle light theme" aria-pressed="false"></button>
+            <div class="field-row" style="margin-top: 10px;">
+              <label for="settingOpacity">Window Glass / Transparency</label>
+              <select class="field" id="settingOpacity">
+                <option value="glass">Translucent Glass (Frosted)</option>
+                <option value="solid">Solid Opaque (100% Solid)</option>
+                <option value="translucent">Semi-Transparent (Light Glass)</option>
+              </select>
+            </div>
           </div>
 
           <!-- Hotkey -->
@@ -136,13 +166,13 @@
             </div>
           </div>
 
-          <!-- Cleanup model -->
+          <!-- Cleanup model (Read-only / Grayed out) -->
           <div class="settings-section">
             <h3>Cleanup</h3>
             <div class="field-row">
               <label for="settingCleanupModel">Ollama model</label>
-              <input class="field" id="settingCleanupModel" placeholder="e.g. llama3.2:3b">
-              <span class="hint">The local Ollama model used to clean up transcripts</span>
+              <input class="field" id="settingCleanupModel" readonly disabled placeholder="e.g. llama3.2:3b">
+              <span class="hint">Model configuration is managed via config.json</span>
             </div>
           </div>
 

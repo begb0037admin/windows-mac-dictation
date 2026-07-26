@@ -131,7 +131,18 @@ class DictationAPI:
             "cleanup_model": config["cleanup"].get("ollama_model", ""),
             "autostart": config.get("autostart", False),
             "theme": config.get("theme", "dark"),
+            "opacity": config.get("opacity", "glass"),
         }
+
+    def set_window_size(self, width, height):
+        """Dynamically resize window for Pill mode / Full mode."""
+        if window:
+            try:
+                window.resize(int(width), int(height))
+                return True
+            except Exception as e:
+                print(f"[window] resize failed: {e}", file=sys.stderr)
+        return False
 
     def send_text(self, text):
         """Paste the (possibly edited) text into the focused app."""
@@ -175,12 +186,9 @@ class DictationAPI:
             raw["theme"] = data["theme"]
             config["theme"] = data["theme"]
 
-        if "cleanup_model" in data and data["cleanup_model"]:
-            if "cleanup" not in raw:
-                raw["cleanup"] = {}
-            raw["cleanup"]["ollama_model"] = data["cleanup_model"]
-            # Also update the in-memory config
-            config["cleanup"]["ollama_model"] = data["cleanup_model"]
+        if "opacity" in data:
+            raw["opacity"] = data["opacity"]
+            config["opacity"] = data["opacity"]
 
         if "autostart" in data:
             raw["autostart"] = data["autostart"]
@@ -399,7 +407,7 @@ def main():
         js_api=api,
         width=400,
         height=360,
-        min_size=(320, 260),
+        min_size=(200, 44),
     )
 
     window.events.loaded += on_window_loaded

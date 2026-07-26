@@ -22,5 +22,6 @@
     "ollama_model": "llama3.2:3b",
     "ollama_url": "http://localhost:11434/api/generate"
   },
-  "autostart": false
+  "autostart": false,
+  "theme": "dark"
 }

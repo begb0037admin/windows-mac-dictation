@@ -1,7 +1,7 @@
 /* app.js — Frontend logic for windows-dictation pywebview UI.
    Receives state updates from Python via global functions,
    manages the waveform visualisation, handles editing/sending transcripts,
-   and bridges settings (hotkey, theme, cleanup model, autostart). */
+   supports Mini Pill Mode, and bridges settings (hotkey, theme, opacity, cleanup model, autostart). */
 
 'use strict';
 
@@ -10,7 +10,9 @@
 const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'review', 'pasting', 'error'];
 let currentState = 'idle';
 let waveformBars = [];
+let pillBars = [];
 let audioLevels = new Array(42).fill(0);
+let isPillMode = false;
 
 // ── DOM references ──
 
@@ -24,10 +26,14 @@ function cacheDom() {
     captionHint: document.getElementById('captionHint'),
     hotkeyLabel: document.getElementById('hotkeyLabel'),
     hotkeyKey: document.getElementById('hotkeyKey'),
+    pillHotkey: document.getElementById('pillHotkey'),
     waveform: document.getElementById('waveform'),
+    pillWaveform: document.getElementById('pillWaveform'),
     flash: document.getElementById('flash'),
     btnSend: document.getElementById('btnSend'),
     btnDismiss: document.getElementById('btnDismiss'),
+    btnPill: document.getElementById('btnPill'),
+    btnExpand: document.getElementById('btnExpand'),
     // Status cells
     cellCapture: document.getElementById('cellCapture'),
     cellWhisper: document.getElementById('cellWhisper'),
@@ -35,11 +41,13 @@ function cacheDom() {
     cellPaste: document.getElementById('cellPaste'),
     // Views
     viewDictation: document.getElementById('viewDictation'),
+    viewPill: document.getElementById('viewPill'),
     viewSettings: document.getElementById('viewSettings'),
     btnSettings: document.getElementById('btnSettings'),
     btnBack: document.getElementById('btnBack'),
     // Settings fields
     settingTheme: document.getElementById('settingTheme'),
+    settingOpacity: document.getElementById('settingOpacity'),
     settingHotkey: document.getElementById('settingHotkey'),
     settingBackend: document.getElementById('settingBackend'),
     settingCleanupModel: document.getElementById('settingCleanupModel'),
@@ -51,16 +59,31 @@ function cacheDom() {
 
 function initWaveform() {
   const container = dom.waveform;
-  if (!container) return;
-  container.innerHTML = '';
-  waveformBars = [];
-  for (let i = 0; i < 42; i++) {
-    const bar = document.createElement('span');
-    bar.className = 'wave-bar';
-    bar.style.setProperty('--i', i);
-    bar.style.animationDelay = `${i * -57}ms`;
-    container.appendChild(bar);
-    waveformBars.push(bar);
+  if (container) {
+    container.innerHTML = '';
+    waveformBars = [];
+    for (let i = 0; i < 42; i++) {
+      const bar = document.createElement('span');
+      bar.className = 'wave-bar';
+      bar.style.setProperty('--i', i);
+      bar.style.animationDelay = `${i * -57}ms`;
+      container.appendChild(bar);
+      waveformBars.push(bar);
+    }
+  }
+
+  const pillContainer = dom.pillWaveform;
+  if (pillContainer) {
+    pillContainer.innerHTML = '';
+    pillBars = [];
+    for (let i = 0; i < 20; i++) {
+      const bar = document.createElement('span');
+      bar.className = 'wave-bar';
+      bar.style.setProperty('--i', i);
+      bar.style.animationDelay = `${i * -80}ms`;
+      pillContainer.appendChild(bar);
+      pillBars.push(bar);
+    }
   }
 }
 
@@ -77,12 +100,23 @@ function updateAudioLevel(rms) {
     waveformBars[i].style.height = `${height}px`;
     waveformBars[i].style.opacity = Math.max(0.3, 0.3 + level * 0.6);
   }
+
+  for (let i = 0; i < pillBars.length; i++) {
+    const level = audioLevels[i * 2] || 0;
+    const height = Math.max(3, level * 16);
+    pillBars[i].style.height = `${height}px`;
+    pillBars[i].style.opacity = Math.max(0.3, 0.3 + level * 0.6);
+  }
 }
 
 function resetWaveform() {
   audioLevels.fill(0);
   for (const bar of waveformBars) {
     bar.style.height = '8px';
+    bar.style.opacity = '';
+  }
+  for (const bar of pillBars) {
+    bar.style.height = '6px';
     bar.style.opacity = '';
   }
 }
@@ -110,7 +144,6 @@ function updateStatus(state, text) {
     if (dom.captionHint) dom.captionHint.textContent = 'Enter to send • Esc to dismiss';
     setTimeout(() => {
       dom.captionText.focus();
-      // Place cursor at end of text
       const range = document.createRange();
       const sel = window.getSelection();
       range.selectNodeContents(dom.captionText);
@@ -190,7 +223,6 @@ async function sendText() {
       console.error('Failed to send text:', e);
     }
   } else {
-    // Demo mode send
     updateStatus('pasting', 'Pasting...');
     setTimeout(() => {
       updateStatus('idle', dom.hotkeyLabel.dataset.idleText || 'Hold hotkey to record');
@@ -207,9 +239,35 @@ async function dismissText() {
       console.error('Failed to dismiss:', e);
     }
   } else {
-    // Demo mode dismiss
     updateStatus('idle', dom.hotkeyLabel.dataset.idleText || 'Hold hotkey to record');
     updateTranscript('');
+  }
+}
+
+// ── Pill / Mini Bar Mode ──
+
+async function enablePillMode() {
+  isPillMode = true;
+  dom.app.classList.add('mode-pill');
+  if (window.pywebview && window.pywebview.api) {
+    try {
+      await pywebview.api.set_window_size(260, 44);
+    } catch (e) {
+      console.error('Failed to resize window to pill mode:', e);
+    }
+  }
+}
+
+async function disablePillMode() {
+  isPillMode = false;
+  dom.app.classList.remove('mode-pill');
+  showDictation();
+  if (window.pywebview && window.pywebview.api) {
+    try {
+      await pywebview.api.set_window_size(400, 360);
+    } catch (e) {
+      console.error('Failed to resize window to full mode:', e);
+    }
   }
 }
 
@@ -238,7 +296,7 @@ function showSettings() {
   loadSettings();
 }
 
-// ── Theme ──
+// ── Appearance (Theme & Opacity) ──
 
 function applyTheme(isLight) {
   if (isLight) {
@@ -253,14 +311,24 @@ function applyTheme(isLight) {
   localStorage.setItem('dictation_theme', isLight ? 'light' : 'dark');
 }
 
+function applyOpacity(opacityMode) {
+  const modes = ['opacity-solid', 'opacity-glass', 'opacity-translucent'];
+  modes.forEach(m => dom.app.classList.remove(m));
+  dom.app.classList.add(`opacity-${opacityMode || 'glass'}`);
+  if (dom.settingOpacity) {
+    dom.settingOpacity.value = opacityMode || 'glass';
+  }
+  localStorage.setItem('dictation_opacity', opacityMode || 'glass');
+}
+
 // ── Settings ──
 
 async function loadSettings() {
-  // Check cached theme first
   const savedTheme = localStorage.getItem('dictation_theme');
-  if (savedTheme) {
-    applyTheme(savedTheme === 'light');
-  }
+  if (savedTheme) applyTheme(savedTheme === 'light');
+
+  const savedOpacity = localStorage.getItem('dictation_opacity');
+  if (savedOpacity) applyOpacity(savedOpacity);
 
   if (!window.pywebview || !window.pywebview.api) return;
   try {
@@ -278,9 +346,8 @@ async function loadSettings() {
         dom.settingAutostart.setAttribute('aria-pressed', String(autostart));
       }
 
-      if (config.theme) {
-        applyTheme(config.theme === 'light');
-      }
+      if (config.theme) applyTheme(config.theme === 'light');
+      if (config.opacity) applyOpacity(config.opacity);
     }
   } catch (e) {
     console.error('Failed to load settings:', e);
@@ -294,7 +361,7 @@ async function saveSettings() {
     await pywebview.api.save_config({
       hotkey: dom.settingHotkey ? dom.settingHotkey.value : undefined,
       theme: isLight ? 'light' : 'dark',
-      cleanup_model: dom.settingCleanupModel ? dom.settingCleanupModel.value : undefined,
+      opacity: dom.settingOpacity ? dom.settingOpacity.value : 'glass',
       autostart: dom.settingAutostart ? dom.settingAutostart.classList.contains('on') : false,
     });
     showFlash('Settings saved');
@@ -305,6 +372,7 @@ async function saveSettings() {
 
 function setHotkeyDisplay(name, display) {
   if (dom.hotkeyKey) dom.hotkeyKey.textContent = display;
+  if (dom.pillHotkey) dom.pillHotkey.textContent = display;
   const idleText = `Hold ${display} to record`;
   if (dom.hotkeyLabel) dom.hotkeyLabel.dataset.idleText = idleText;
 }
@@ -315,11 +383,14 @@ function init() {
   cacheDom();
   initWaveform();
 
-  // Restore saved theme early
+  // Restore saved appearance early
   const savedTheme = localStorage.getItem('dictation_theme');
   if (savedTheme === 'light') applyTheme(true);
 
-  // Navigation
+  const savedOpacity = localStorage.getItem('dictation_opacity');
+  if (savedOpacity) applyOpacity(savedOpacity);
+
+  // Navigation & Modes
   if (dom.btnSettings) {
     dom.btnSettings.addEventListener('click', () => {
       if (dom.viewSettings.classList.contains('active')) {
@@ -336,6 +407,9 @@ function init() {
     });
   }
 
+  if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
+  if (dom.btnExpand) dom.btnExpand.addEventListener('click', disablePillMode);
+
   // Action buttons
   if (dom.btnSend) dom.btnSend.addEventListener('click', sendText);
   if (dom.btnDismiss) dom.btnDismiss.addEventListener('click', dismissText);
@@ -345,6 +419,13 @@ function init() {
     dom.settingTheme.addEventListener('click', () => {
       const isLight = !dom.settingTheme.classList.contains('on');
       applyTheme(isLight);
+      saveSettings();
+    });
+  }
+
+  if (dom.settingOpacity) {
+    dom.settingOpacity.addEventListener('change', () => {
+      applyOpacity(dom.settingOpacity.value);
       saveSettings();
     });
   }
@@ -360,10 +441,6 @@ function init() {
       dom.settingAutostart.setAttribute('aria-pressed', String(isOn));
       saveSettings();
     });
-  }
-
-  if (dom.settingCleanupModel) {
-    dom.settingCleanupModel.addEventListener('change', saveSettings);
   }
 
   // Keyboard shortcuts (Enter to send, Esc to dismiss in review state)
