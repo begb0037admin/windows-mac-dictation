@@ -251,7 +251,8 @@ def partial_transcription_loop(stop_event):
         try:
             with transcribe_lock:
                 partial_text = transcribe(chunk_audio, SAMPLE_RATE, config["whisper"])
-        except Exception:
+        except Exception as exc:
+            print(f"[partial-transcribe] skipped: {exc}", file=sys.stderr)
             continue
 
         display_text = f"{finalized_text} {partial_text}".strip()
@@ -270,19 +271,20 @@ def start_recording():
             return
         recording = True
         frames = []
+        stream = sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="float32",
+            callback=audio_callback,
+        )
+        stream.start()
+        partial_stop_event = threading.Event()
+        local_stop_event = partial_stop_event
     push_status("recording", "Listening...")
     push_transcript("")
     print("[rec] recording started")
-    stream = sd.InputStream(
-        samplerate=SAMPLE_RATE,
-        channels=1,
-        dtype="float32",
-        callback=audio_callback,
-    )
-    stream.start()
-    partial_stop_event = threading.Event()
     threading.Thread(
-        target=partial_transcription_loop, args=(partial_stop_event,), daemon=True
+        target=partial_transcription_loop, args=(local_stop_event,), daemon=True
     ).start()
 
 
@@ -292,12 +294,15 @@ def stop_recording():
         if not recording:
             return
         recording = False
-    if partial_stop_event:
-        partial_stop_event.set()
-    if stream:
-        stream.stop()
-        stream.close()
+        local_stream = stream
         stream = None
+        local_stop_event = partial_stop_event
+
+    if local_stop_event:
+        local_stop_event.set()
+    if local_stream:
+        local_stream.stop()
+        local_stream.close()
 
     with state_lock:
         captured = list(frames)
@@ -370,6 +375,33 @@ def on_window_closing():
     os._exit(0)
 
 
+def check_macos_accessibility():
+    """Preflight-check Accessibility/Input Monitoring access on macOS before
+    starting the hotkey listener. Without this permission, pynput silently
+    receives no key events at all and pyautogui's paste keystroke silently
+    does nothing — this makes that failure loud instead, per CLAUDE.md's
+    hard rule. Uses Quartz, already a transitive pynput dependency on Mac,
+    so this adds no new requirement."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        from Quartz import CGPreflightListenEventAccess
+    except ImportError:
+        return  # Can't preflight-check; existing docs/behaviour still apply
+
+    if not CGPreflightListenEventAccess():
+        print(
+            "[main] Accessibility / Input Monitoring permission not granted — "
+            "the hotkey listener would silently receive no key events and "
+            "paste simulation would silently do nothing. Grant it under "
+            "System Settings > Privacy & Security > Accessibility (and Input "
+            "Monitoring) for Terminal / your Python interpreter, then restart "
+            "this app.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def main():
     global window
 
@@ -391,6 +423,8 @@ def main():
                 file=sys.stderr,
             )
         sys.exit(1)
+
+    check_macos_accessibility()
 
     print(
         f"[main] windows-dictation starting on {platform.system()} — "
