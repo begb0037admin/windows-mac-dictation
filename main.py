@@ -121,12 +121,39 @@ class DictationAPI:
         else:
             backend_display = f"{backend_name} {model_size}"
 
+        plat = "darwin" if platform.system() == "Darwin" else "windows"
+        hotkey_val = HOTKEY_NAME
+
         return {
             "hotkey": HOTKEY_DISPLAY,
+            "hotkey_raw": hotkey_val,
             "whisper_backend": backend_display,
             "cleanup_model": config["cleanup"].get("ollama_model", ""),
             "autostart": config.get("autostart", False),
+            "theme": config.get("theme", "dark"),
         }
+
+    def send_text(self, text):
+        """Paste the (possibly edited) text into the focused app."""
+        if not text or not text.strip():
+            push_status("idle", IDLE_STATUS)
+            return False
+        push_status("pasting", "Pasting...")
+        try:
+            inject(text.strip())
+            print(f"[inject] sent: {text.strip()!r}")
+            threading.Timer(1.0, lambda: push_status("idle", IDLE_STATUS)).start()
+            return True
+        except Exception as exc:
+            print(f"[inject] failed: {exc}", file=sys.stderr)
+            push_status("error", f"Paste failed: {exc}")
+            return False
+
+    def dismiss(self):
+        """Dismiss the current transcript without pasting."""
+        push_status("idle", IDLE_STATUS)
+        push_js("clearEditor()")
+        return True
 
     def save_config(self, data):
         """Save editable settings to config.json."""
@@ -138,6 +165,16 @@ class DictationAPI:
             raw = {}
 
         # Update editable fields
+        if "hotkey" in data and data["hotkey"]:
+            plat = "darwin" if platform.system() == "Darwin" else "windows"
+            if "hotkey" not in raw or not isinstance(raw["hotkey"], dict):
+                raw["hotkey"] = {}
+            raw["hotkey"][plat] = data["hotkey"]
+
+        if "theme" in data:
+            raw["theme"] = data["theme"]
+            config["theme"] = data["theme"]
+
         if "cleanup_model" in data and data["cleanup_model"]:
             if "cleanup" not in raw:
                 raw["cleanup"] = {}
@@ -284,14 +321,7 @@ def stop_recording():
         cleaned = text
 
     push_final_text(cleaned)
-    push_status("pasting", "Pasting...")
-    try:
-        inject(cleaned)
-        # Brief pause to show the pasted state, then return to idle
-        threading.Timer(1.5, lambda: push_status("idle", IDLE_STATUS)).start()
-    except Exception as exc:
-        print(f"[inject] failed: {exc}", file=sys.stderr)
-        push_status("error", f"Paste failed: {exc}")
+    push_status("review", "Edit if needed — Enter to send, Esc to dismiss")
 
 
 # ── Hotkey ──
@@ -367,9 +397,9 @@ def main():
         "Dictation",
         url=str(UI_DIR / "index.html"),
         js_api=api,
-        width=480,
-        height=520,
-        min_size=(380, 420),
+        width=400,
+        height=360,
+        min_size=(320, 260),
     )
 
     window.events.loaded += on_window_loaded

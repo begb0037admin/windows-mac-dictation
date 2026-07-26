@@ -34,30 +34,49 @@
       <!-- Dictation View -->
       <div class="view active" id="viewDictation">
 
-        <!-- Hotkey badge -->
-        <div class="hotkey-badge" id="hotkeyLabel" data-idle-text="Hold hotkey to record">
-          Hold <span class="key" id="hotkeyKey">...</span>
+        <!-- Status row: hotkey badge + status -->
+        <div class="status-row">
+          <div class="hotkey-badge" id="hotkeyLabel" data-idle-text="Hold hotkey to record">
+            <span class="key" id="hotkeyKey">...</span>
+          </div>
+          <div class="status-indicator">
+            <span class="status-dot"></span>
+            <span id="statusText">Initialising...</span>
+          </div>
         </div>
 
-        <!-- Status -->
-        <div class="status-indicator">
-          <span class="status-dot"></span>
-          <span id="statusText">Initialising...</span>
-        </div>
-
-        <!-- Waveform -->
+        <!-- Waveform (compact) -->
         <div class="waveform-container" id="waveform"></div>
 
-        <!-- Live caption -->
+        <!-- Editable transcript area -->
         <div class="caption-panel">
-          <strong class="caption-label">Live transcript</strong>
-          <div class="caption-text" id="captionText">
+          <div class="caption-header">
+            <strong class="caption-label">Transcript</strong>
+            <span class="caption-hint" id="captionHint"></span>
+          </div>
+          <div class="caption-text" id="captionText" contenteditable="false" spellcheck="true">
             <span class="caption-placeholder">Waiting for speech...</span>
           </div>
         </div>
 
-        <!-- Status cells -->
-        <div class="status-grid">
+        <!-- Action buttons (visible in review state) -->
+        <div class="action-bar" id="actionBar">
+          <button class="action-btn dismiss" id="btnDismiss" type="button" title="Dismiss (Esc)">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M3 3l8 8M11 3l-8 8"/>
+            </svg>
+            Dismiss
+          </button>
+          <button class="action-btn send" id="btnSend" type="button" title="Send (Enter)">
+            Send
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 7h12M8 2l5 5-5 5"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Status cells (compact row) -->
+        <div class="status-grid" id="statusGrid">
           <div class="status-cell" id="cellCapture">
             <strong>Capture</strong>
             <span>Ready</span>
@@ -87,22 +106,37 @@
         </button>
 
         <div class="settings">
-          <!-- Hotkey & backend (read-only, restart required) -->
+          <!-- Theme toggle -->
+          <div class="switch-row">
+            <div>
+              <strong>Light theme</strong>
+              <span>Switch between dark and light appearance</span>
+            </div>
+            <button class="switch" id="settingTheme" type="button" aria-label="Toggle light theme" aria-pressed="false"></button>
+          </div>
+
+          <!-- Hotkey -->
           <div class="settings-section">
             <h3>Input</h3>
             <div class="field-row">
-              <label for="settingHotkey">Hotkey</label>
-              <input class="field" id="settingHotkey" readonly>
-              <span class="hint">Edit config.json and restart to change</span>
+              <label for="settingHotkey">Hotkey (hold to record)</label>
+              <select class="field" id="settingHotkey">
+                <option value="alt_l">Left Option / Alt</option>
+                <option value="alt_r">Right Option / Alt</option>
+                <option value="ctrl_r">Right Control</option>
+                <option value="ctrl_l">Left Control</option>
+                <option value="cmd_r">Right Command</option>
+              </select>
+              <span class="hint">Restart required after changing</span>
             </div>
             <div class="field-row">
               <label for="settingBackend">Whisper backend</label>
-              <input class="field" id="settingBackend" readonly>
+              <input class="field" id="settingBackend" readonly disabled>
               <span class="hint">Platform-specific, set in config.json</span>
             </div>
           </div>
 
-          <!-- Cleanup model (editable) -->
+          <!-- Cleanup model -->
           <div class="settings-section">
             <h3>Cleanup</h3>
             <div class="field-row">
