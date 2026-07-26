@@ -1,5 +1,7 @@
 # Build Brief: Windows Voice Dictation Assistant ("Eloquent for Windows")
 
+> Cross-reference: this document is the historical build brief plus the rationale behind every scope amendment since. For the current-state component table, state machine, threading model, and data flow, see `../ARCHITECTURE.md`. For session-by-session history, see `../HANDOVER.md`.
+
 ## 1. Elevator pitch
 
 A personal, system-wide voice dictation tool for Windows. Hold a hotkey, speak naturally (including "ums," false starts, self-corrections), release the hotkey, and clean, polished text is typed into whatever text box currently has focus — Teams chat, a browser, Slack, an email, anywhere. Inspired by Google AI Edge Eloquent (Mac/iOS only, not available on Windows), but built from scratch with open components — no Google code involved.
@@ -18,6 +20,8 @@ Primary use case: quick Teams messages and other short chat-box text, not long-f
 8. Tray icon returns to idle.
 
 Total round-trip target: under ~3 seconds for a short sentence on a mid-range machine.
+
+> **Note:** steps 1, 3, and 7–8 describe the *original* design. The tray icon was dropped (§11) and, as of §14, step 7 no longer happens automatically — the cleaned text is shown for review/edit first. See `../ARCHITECTURE.md` for the current flow.
 
 ## 3. Recommended architecture
 
@@ -108,6 +112,8 @@ Original brief scoped Windows only. Kevin confirmed after Step 1 was built that 
 
 **Still local-first, still no cloud dependency in the MVP** — this amendment is about running the same behaviour on two OSes, not about adding a server component.
 
+> **Note:** the Mac default hotkey listed above (Right Option / `alt_r`) was corrected on 2026-07-26 to Left Option (`alt_l`) — see §14.
+
 ## 11. Amendment — normal app window, no system tray; live caption feedback, added 2026-07-09
 
 After Steps 1–4 were built and confirmed working (tray icon + background utility, hold→release→paste, no visible feedback while speaking), Kevin raised two changes:
@@ -124,6 +130,8 @@ After Steps 1–4 were built and confirmed working (tray icon + background utili
 - Re-transcribing the whole growing buffer every ~1.5s (rather than true incremental/streaming ASR) is a deliberate simplicity-over-efficiency tradeoff — fine for short chat-length dictations on the target hardware (RTX 3070 / Apple Silicon), avoids the much larger complexity of real streaming transcription.
 
 **"Transcribe File" feature — removed (2026-07-25).** This feature was scoped and built during the 2026-07-09 session but has been removed per the project brief split: `windows-dictation` is for live push-to-talk dictation only, file transcription belongs to `meeting-transcriber`. The code (`choose_audio_file()`, `_process_audio_file()`, file-path branch in `transcribe.py`) was deleted. The `ffmpeg` Mac-only prerequisite that this feature required is no longer needed.
+
+> **Note:** as of §14, the "paste into the focused app still happening once, cleanly, on release" behaviour described above under option (B) no longer holds — there is now a review/confirm step before the paste happens.
 
 ## 12. Amendment — distribution to colleagues, raised 2026-07-09
 
@@ -158,3 +166,19 @@ The tkinter window (a basic status label + text box, with a "Transcribe File" bu
 
 **Why pywebview over alternatives:** `pywebview` is a thin wrapper around the OS's native webview engine — no bundled browser, no Electron overhead, just HTML/CSS/JS in a native window. This gives the rich UI of a web app (matching Kevin's mockup) with the lightweight footprint of a desktop utility. The Python backend doesn't change at all; the webview is purely a display layer.
 
+> **Note:** §14 supersedes several details here — the state machine gained a `review` step (idle/recording/transcribing/cleanup/**review**/pasting/error), and the Settings panel gained hotkey/theme/opacity fields.
+
+## 14. Amendment — compact review UI, Pill mode, frameless/vibrancy window, 2026-07-26
+
+Six commits landed in one session, further reworking the UI built in §13. Logged in `../HANDOVER.md`'s 2026-07-26 entry as previously-undocumented work; recorded here per this document's own amendment pattern.
+
+**What changed:**
+- **Editable review step.** The transcript area becomes editable (`contenteditable`) once cleanup finishes. A new `review` state sits between `cleanup` and `pasting` in the state machine, with Send/Dismiss buttons and Enter/Esc keyboard shortcuts. **This replaces the §11/§13 behaviour of pasting automatically, once, on release** — the pipeline now always stops for explicit confirmation before touching the focused app.
+- **Pill/mini-bar mode.** A compact 260×44 bar view, toggled from the main view, backed by a real OS window resize (`DictationAPI.set_window_size`).
+- **Frameless, transparent window.** No native title bar or OS close button (`frameless=True`, `transparent=True`); a custom in-UI close button added.
+- **Native macOS Vibrancy** (`vibrancy=True`, `NSVisualEffectView`) for the glassmorphism look from Kevin's mockup. This is a macOS-specific pywebview capability — its effect on Windows/WebView2 is unverified.
+- **Window opacity/glass Settings control** (`solid` / `glass` / `translucent`), plus a light/dark theme toggle, both persisted to `config.json` and cached client-side in `localStorage`.
+- **Mac hotkey default corrected:** `alt_r` (Right Option) → `alt_l` (Left Option) — standard Apple keyboards have no physical Right Option key, so the previous default was unusable as shipped.
+- **Standalone demo mode** in `app.js`, for previewing the UI in a browser with no Python backend attached (dev convenience only).
+
+**Not yet tested on either platform.** See `../ARCHITECTURE.md` §7 for the full list of open questions this amendment raises (chiefly: does `vibrancy`/`transparent` render sensibly on Windows).
