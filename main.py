@@ -416,6 +416,7 @@ def main():
         min_size=(200, 44),
         frameless=True,
         transparent=True,
+        vibrancy=True,
         easy_drag=False,
     )
 

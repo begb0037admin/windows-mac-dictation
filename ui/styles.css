@@ -73,17 +73,20 @@ body {
 }
 
 .app.opacity-glass {
-  background: var(--gradient-bg), var(--bg);
-  backdrop-filter: blur(12px);
+  /* Rely on native macOS Vibrancy (NSVisualEffectView), apply subtle tint */
+  background: rgba(17, 24, 39, 0.45);
+}
+
+.theme-light .app.opacity-glass {
+  background: rgba(255, 255, 255, 0.45);
 }
 
 .app.opacity-translucent {
-  background: rgba(17, 24, 39, 0.75);
-  backdrop-filter: blur(8px);
+  background: rgba(17, 24, 39, 0.85);
 }
 
-.theme-light.app.opacity-translucent {
-  background: rgba(240, 244, 248, 0.85);
+.theme-light .app.opacity-translucent {
+  background: rgba(240, 244, 248, 0.90);
 }
 
 /* ── Layout ── */
