@@ -144,6 +144,12 @@ class DictationAPI:
                 print(f"[window] resize failed: {e}", file=sys.stderr)
         return False
 
+    def close_window(self):
+        """Close the pywebview window (since OS close button is hidden)."""
+        if window:
+            window.destroy()
+        return True
+
     def send_text(self, text):
         """Paste the (possibly edited) text into the focused app."""
         if not text or not text.strip():
@@ -408,6 +414,9 @@ def main():
         width=400,
         height=360,
         min_size=(200, 44),
+        frameless=True,
+        transparent=True,
+        easy_drag=False,
     )
 
     window.events.loaded += on_window_loaded

@@ -34,6 +34,7 @@ function cacheDom() {
     btnDismiss: document.getElementById('btnDismiss'),
     btnPill: document.getElementById('btnPill'),
     btnExpand: document.getElementById('btnExpand'),
+    btnClose: document.getElementById('btnClose'),
     // Status cells
     cellCapture: document.getElementById('cellCapture'),
     cellWhisper: document.getElementById('cellWhisper'),
@@ -409,6 +410,13 @@ function init() {
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
   if (dom.btnExpand) dom.btnExpand.addEventListener('click', disablePillMode);
+  if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
+    if (window.pywebview && window.pywebview.api) {
+      await pywebview.api.close_window();
+    } else {
+      console.log('Close window');
+    }
+  });
 
   // Action buttons
   if (dom.btnSend) dom.btnSend.addEventListener('click', sendText);
