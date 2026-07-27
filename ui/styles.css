@@ -147,35 +147,56 @@ body.pill-mode .app {
   gap: 6px;
 }
 
+/* Single-surface neumorphic ("Medium", approved from mockup): one flat
+   background, zero border -- elevation comes entirely from a dual shadow
+   (dark down-right, faint light up-left) tuned to actually read against
+   the app's near-black background, where a plain black shadow would be
+   invisible. Shared by .icon-btn and .hotkey-badge below so the whole
+   header control family reads as one consistent style. */
 .icon-btn {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elevated);
+  border: none;
+  border-radius: 10px;
+  background: #1b2334;
   color: var(--ink-dim);
   cursor: pointer;
   transition: all var(--transition);
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05);
+}
+
+.theme-light .icon-btn {
+  background: #f7f9fc;
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9);
 }
 
 .icon-btn:hover {
-  border-color: var(--border-active);
   color: var(--ink);
-  background: var(--bg-panel);
 }
 
 .icon-btn.active {
-  border-color: var(--accent-cyan);
   color: var(--accent-cyan);
-  background: rgba(141, 216, 255, 0.1);
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05),
+    0 0 0 1px rgba(141, 216, 255, 0.4);
+}
+
+.theme-light .icon-btn.active {
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9),
+    0 0 0 1px rgba(14, 116, 144, 0.4);
 }
 
 .icon-btn.danger:hover {
-  border-color: var(--accent-red);
   color: var(--accent-red);
-  background: rgba(248, 113, 113, 0.1);
 }
 
 .icon-btn.mini {
@@ -289,47 +310,34 @@ body.pill-mode .app {
   margin-bottom: 10px;
 }
 
+/* Single element, single background, no border -- text sits directly in
+   the badge rather than a nested "key" chip (that nesting was the actual
+   "background sitting on a background, two borders" problem). Same
+   Medium neumorphic treatment and muted label color as .icon-btn, so the
+   badge reads as part of the same control family instead of standing out
+   as its own thing. */
 .hotkey-badge {
   display: inline-flex;
   align-items: center;
-  padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
-  font-weight: 800;
-  font-size: 11px;
-  color: var(--ink);
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--ink-dim);
   flex-shrink: 0;
+  border: none;
+  background: #1b2334;
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.22),
-    0 6px 14px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05);
 }
 
 .theme-light .hotkey-badge {
-  border-color: rgba(0, 0, 0, 0.06);
-  background: linear-gradient(180deg, #ffffff, rgba(255, 255, 255, 0.7));
+  background: #f7f9fc;
   box-shadow:
-    0 1px 2px rgba(17, 24, 39, 0.08),
-    0 6px 14px rgba(17, 24, 39, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
-}
-
-.hotkey-badge .key {
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.14);
-  font-size: 11px;
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.3),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.theme-light .hotkey-badge .key {
-  background: rgba(0, 0, 0, 0.06);
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.14),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9);
 }
 
 /* Ready/error notification light, next to the hotkey badge. Idle reads as

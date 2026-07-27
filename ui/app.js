@@ -31,7 +31,6 @@ function cacheDom() {
     app: document.querySelector('.app'),
     statusLight: document.getElementById('statusLight'),
     captionText: document.getElementById('captionText'),
-    hotkeyLabel: document.getElementById('hotkeyLabel'),
     hotkeyKey: document.getElementById('hotkeyKey'),
     waveform: document.getElementById('waveform'),
     pillWaveform: document.getElementById('pillWaveform'),
