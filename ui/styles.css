@@ -388,6 +388,8 @@ body.pill-mode .app {
 
 /* ── Waveform (compact) ── */
 
+/* Same single-surface neumorphic treatment as .icon-btn/.hotkey-badge:
+   flat background, no border, elevation from a dual shadow. */
 .waveform-container {
   height: 76px;
   display: grid;
@@ -396,15 +398,34 @@ body.pill-mode .app {
   gap: 1.5px;
   margin-bottom: 10px;
   padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elevated);
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  border: none;
+  border-radius: 12px;
+  background: #1b2334;
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05);
+  transition: box-shadow 0.3s ease;
+}
+
+.theme-light .waveform-container {
+  background: #f7f9fc;
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9);
 }
 
 .app.state-recording .waveform-container {
-  border-color: rgba(167, 139, 250, 0.35);
-  box-shadow: 0 0 20px rgba(167, 139, 250, 0.1);
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05),
+    0 0 20px rgba(167, 139, 250, 0.25);
+}
+
+.theme-light .app.state-recording .waveform-container {
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9),
+    0 0 16px rgba(124, 58, 237, 0.2);
 }
 
 .wave-bar {
@@ -451,14 +472,34 @@ body.pill-mode .app {
   flex-direction: column;
   padding: 10px;
   margin-bottom: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  transition: border-color var(--transition);
+  border: none;
+  border-radius: 12px;
+  background: #1b2334;
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05);
+  transition: box-shadow var(--transition);
+}
+
+.theme-light .caption-panel {
+  background: #f7f9fc;
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9);
 }
 
 .app.state-recording .caption-panel {
-  border-color: rgba(108, 226, 182, 0.25);
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.55),
+    -4px -4px 11px rgba(255, 255, 255, 0.05),
+    0 0 16px rgba(108, 226, 182, 0.2);
+}
+
+.theme-light .app.state-recording .caption-panel {
+  box-shadow:
+    6px 6px 14px rgba(0, 0, 0, 0.12),
+    -4px -4px 11px rgba(255, 255, 255, 0.9),
+    0 0 14px rgba(13, 150, 104, 0.2);
 }
 
 .caption-header {
