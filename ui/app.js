@@ -9,10 +9,17 @@
 // ── State ──
 
 const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'pasting', 'error'];
+// audioLevels must be at least as long as the larger of the two bar counts
+// below (the pill reads it at index i*2, so it needs at least
+// PILL_BAR_COUNT*2 slots too) -- a mismatch here previously left the
+// rightmost bars reading past the end of the array (undefined -> NaN
+// height), which froze them instead of scrolling like the rest.
+const FULL_BAR_COUNT = 54;
+const PILL_BAR_COUNT = 24;
 let currentState = 'idle';
 let waveformBars = [];
 let pillBars = [];
-let audioLevels = new Array(42).fill(0);
+let audioLevels = new Array(FULL_BAR_COUNT).fill(0);
 let isPillMode = false;
 
 // ── DOM references ──
@@ -57,7 +64,7 @@ function initWaveform() {
   if (container) {
     container.innerHTML = '';
     waveformBars = [];
-    for (let i = 0; i < 54; i++) {
+    for (let i = 0; i < FULL_BAR_COUNT; i++) {
       const bar = document.createElement('span');
       bar.className = 'wave-bar';
       bar.style.setProperty('--i', i);
@@ -71,7 +78,7 @@ function initWaveform() {
   if (pillContainer) {
     pillContainer.innerHTML = '';
     pillBars = [];
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < PILL_BAR_COUNT; i++) {
       const bar = document.createElement('span');
       bar.className = 'wave-bar';
       bar.style.setProperty('--i', i);
