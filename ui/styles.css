@@ -278,6 +278,61 @@ body.pill-mode .app {
   border-radius: 99px;
 }
 
+/* Once recording stops, the waveform has nothing live to show — swap it for
+   a short state label instead, so the mini pill never sits there silent
+   about what's actually happening (transcribing/cleaning up/ready to send)
+   while it's too small to show the full status text used elsewhere. */
+.pill-status {
+  display: none;
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app:not(.state-idle):not(.state-recording) .pill-waveform { display: none; }
+.app:not(.state-idle):not(.state-recording) .pill-status { display: block; }
+
+/* Send/Dismiss controls, reachable without expanding back to Full mode —
+   review is the only pill state that needs them; hidden otherwise. */
+.pill-actions {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.app.state-review .pill-actions { display: flex; }
+
+.pill-action-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+
+.pill-action-btn.dismiss {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--accent-red);
+}
+
+.pill-action-btn.dismiss:hover { background: rgba(248, 113, 113, 0.28); }
+
+.pill-action-btn.send {
+  background: rgba(108, 226, 182, 0.2);
+  color: var(--accent-green);
+}
+
+.pill-action-btn.send:hover { background: rgba(108, 226, 182, 0.35); }
+
 /* ── Status row (compact) ── */
 
 .status-row {

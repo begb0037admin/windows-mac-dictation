@@ -29,9 +29,13 @@ function cacheDom() {
     hotkeyKey: document.getElementById('hotkeyKey'),
     waveform: document.getElementById('waveform'),
     pillWaveform: document.getElementById('pillWaveform'),
+    pillStatus: document.getElementById('pillStatus'),
+    pillActions: document.getElementById('pillActions'),
     flash: document.getElementById('flash'),
     btnSend: document.getElementById('btnSend'),
     btnDismiss: document.getElementById('btnDismiss'),
+    btnPillSend: document.getElementById('btnPillSend'),
+    btnPillDismiss: document.getElementById('btnPillDismiss'),
     btnPill: document.getElementById('btnPill'),
     btnClose: document.getElementById('btnClose'),
     // Views
@@ -120,6 +124,17 @@ function resetWaveform() {
 
 // ── State management ──
 
+// Short labels for the mini pill's status text — the full status text (e.g.
+// "Edit if needed — Enter to send, Esc to dismiss") is too long for a
+// 170px-wide pill, so this is a separate, deliberately terse mapping.
+const PILL_STATUS_TEXT = {
+  transcribing: 'Transcribing…',
+  cleanup: 'Cleaning up…',
+  review: 'Ready to send',
+  pasting: 'Pasting…',
+  error: 'Error',
+};
+
 /**
  * Called from Python to update the app state.
  * @param {string} state - One of: idle, recording, transcribing, cleanup, review, pasting, error
@@ -133,6 +148,7 @@ function updateStatus(state, text) {
   currentState = state;
 
   if (dom.statusLight) dom.statusLight.title = text;
+  if (dom.pillStatus) dom.pillStatus.textContent = PILL_STATUS_TEXT[state] || '';
 
   // Review state: make text editable, allow Enter to send / Esc to dismiss
   if (state === 'review') {
@@ -529,6 +545,8 @@ function init() {
   // Action buttons
   if (dom.btnSend) dom.btnSend.addEventListener('click', sendText);
   if (dom.btnDismiss) dom.btnDismiss.addEventListener('click', dismissText);
+  if (dom.btnPillSend) dom.btnPillSend.addEventListener('click', sendText);
+  if (dom.btnPillDismiss) dom.btnPillDismiss.addEventListener('click', dismissText);
 
   // Settings listeners
   if (dom.settingTheme) {
