@@ -439,18 +439,22 @@ body.pill-mode .app {
 }
 
 .app.state-recording .wave-bar { opacity: 0.85; }
-/* Idle previously only breathed height/opacity on a single static
-   gradient -- no color motion at all, since the Aurora hue-sweep is
-   computed in JS and only runs while updateAudioLevel() is actively
-   firing (i.e. while recording). Adding a continuous hue-rotate here
-   keeps color flowing through the bars at rest too, so the pill/panel
-   reads as alive rather than dormant. Each bar already gets its own
-   animation-delay from JS (staggered per index) -- since that one delay
-   value applies to every animation listed below, the hue cycle is
-   phase-offset per bar too, giving a traveling color wave rather than
-   every bar pulsing the same color in lockstep. */
+/* Idle is chrome/silver, not Aurora -- color is reserved for while
+   you're actually recording (JS's auroraColor() only ever runs from
+   updateAudioLevel(), which only fires while the hotkey is held). At
+   rest the bars get a metallic grey/white gradient with a brightness
+   pulse per bar (staggered via each bar's existing animation-delay) so
+   it reads as a traveling flash of light sweeping across chrome rather
+   than a colored glow. Inverted for light theme -- a light chrome
+   gradient would nearly vanish against a near-white panel, so light
+   theme uses darker charcoal/graphite tones instead. */
 .app.state-idle .wave-bar {
-  animation: wave-idle 2.4s ease-in-out infinite, wave-hue 6s linear infinite;
+  background: linear-gradient(180deg, #c8d2e0, #f5f8fc, #97a3b8);
+  animation: wave-idle 2.4s ease-in-out infinite, wave-chrome-flash 3.2s ease-in-out infinite;
+}
+
+.theme-light .app.state-idle .wave-bar {
+  background: linear-gradient(180deg, #8b95a5, #4b5563, #b0b8c4);
 }
 
 @keyframes wave-idle {
@@ -458,9 +462,9 @@ body.pill-mode .app {
   50% { transform: scaleY(0.8); opacity: 0.55; }
 }
 
-@keyframes wave-hue {
-  0% { filter: hue-rotate(0deg); }
-  100% { filter: hue-rotate(360deg); }
+@keyframes wave-chrome-flash {
+  0%, 100% { filter: brightness(0.85); }
+  50% { filter: brightness(1.7); }
 }
 
 /* ── Transcript area ── */
