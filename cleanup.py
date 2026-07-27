@@ -39,7 +39,18 @@ def cleanup(text: str, cleanup_config: dict) -> str:
             "system": SYSTEM_PROMPT,
             "prompt": f"<transcript>\n{text}\n</transcript>",
             "stream": False,
-            "options": {"temperature": 0},
+            # Ollama unloads a model ~5 minutes after its last use by default,
+            # so any dictation after a short gap pays a full model-reload
+            # (several seconds, worse under GPU contention with Whisper) on
+            # top of actual inference. Keeping it resident for 30 minutes
+            # covers realistic gaps between dictations at the cost of some
+            # idle VRAM (llama3.2:3b is small).
+            "keep_alive": "30m",
+            # Cleanup output is never longer than the input transcript in
+            # practice (it strips filler words, it doesn't add content) --
+            # capping generation bounds worst-case latency without affecting
+            # normal output.
+            "options": {"temperature": 0, "num_predict": 512},
         }
     ).encode("utf-8")
 

@@ -20,10 +20,13 @@ Without it, pynput silently receives no key events, and pyautogui's paste
 keystroke silently does nothing.
 """
 
+import ctypes
 import json
 import platform
+import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -73,6 +76,74 @@ recording = False
 frames = []
 stream = None
 partial_stop_event = None
+focus_target = None
+
+
+# ── Focus tracking ──
+#
+# The Electron UI auto-focuses its own transcript box the instant cleanup
+# finishes (so Enter-to-send/Esc-to-dismiss work immediately) -- but that
+# silently steals OS input focus away from wherever the user was actually
+# dictating into (a browser tab, Teams, a terminal). Left alone, the paste
+# keystroke in cmd_send_text() then lands on the Electron window itself,
+# not the target app, and the user sees nothing happen. Fix: snapshot
+# whichever window/app had focus the instant the hotkey was first pressed
+# (before any of that UI focus-stealing happens), and force focus back to
+# it immediately before pasting.
+
+def capture_focus_target():
+    system = platform.system()
+    if system == "Windows":
+        try:
+            return ctypes.windll.user32.GetForegroundWindow()
+        except Exception:
+            return None
+    elif system == "Darwin":
+        try:
+            result = subprocess.run(
+                ["osascript", "-e",
+                 'tell application "System Events" to get name of first process whose frontmost is true'],
+                capture_output=True, text=True, timeout=2,
+            )
+            return result.stdout.strip() or None
+        except Exception:
+            return None
+    return None
+
+
+def restore_focus_target(target):
+    if not target:
+        return
+    system = platform.system()
+    if system == "Windows":
+        try:
+            user32 = ctypes.windll.user32
+            fg = user32.GetForegroundWindow()
+            if fg == target:
+                return
+            fg_thread = user32.GetWindowThreadProcessId(fg, None)
+            target_thread = user32.GetWindowThreadProcessId(target, None)
+            current_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+            # SetForegroundWindow silently refuses to switch focus for a
+            # background process under normal circumstances (Windows'
+            # anti-focus-stealing protection) -- attaching this process's
+            # input queue to both the currently-focused and the target
+            # window's threads is the standard workaround.
+            user32.AttachThreadInput(fg_thread, current_thread, True)
+            user32.AttachThreadInput(target_thread, current_thread, True)
+            user32.SetForegroundWindow(target)
+            user32.AttachThreadInput(fg_thread, current_thread, False)
+            user32.AttachThreadInput(target_thread, current_thread, False)
+        except Exception as exc:
+            print(f"[focus] failed to restore Windows focus: {exc}", file=sys.stderr)
+    elif system == "Darwin":
+        try:
+            subprocess.run(
+                ["osascript", "-e", f'tell application "{target}" to activate'],
+                timeout=2,
+            )
+        except Exception as exc:
+            print(f"[focus] failed to restore macOS focus: {exc}", file=sys.stderr)
 
 
 # ── Event stream (Python -> Electron, stdout) ──
@@ -138,6 +209,8 @@ def cmd_send_text(text):
         return
     push_status("pasting", "Pasting...")
     try:
+        restore_focus_target(focus_target)
+        time.sleep(0.12)  # let the OS actually finish switching focus
         inject(text.strip())
         print(f"[inject] sent: {text.strip()!r}")
         threading.Timer(1.0, lambda: push_status("idle", IDLE_STATUS)).start()
@@ -148,6 +221,7 @@ def cmd_send_text(text):
 
 def cmd_dismiss():
     """Dismiss the current transcript without pasting."""
+    restore_focus_target(focus_target)
     push_status("idle", IDLE_STATUS)
     emit_event({"type": "clear_editor"})
 
@@ -274,7 +348,8 @@ def partial_transcription_loop(stop_event):
 
 
 def start_recording():
-    global recording, frames, stream, partial_stop_event
+    global recording, frames, stream, partial_stop_event, focus_target
+    focus_target = capture_focus_target()
     with state_lock:
         if recording:
             return
