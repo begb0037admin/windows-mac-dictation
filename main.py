@@ -7,11 +7,13 @@ This process owns no window at all — the UI is the Electron shell in
 electron/, which spawns this script as a child process and speaks to it
 over stdio: one JSON object per line. Stdout carries events (state
 changes, transcript updates, audio levels) out to the UI; stdin carries
-commands (send_text, dismiss, get_config, save_config) in from it. See
-electron/main.js for the other side of this channel.
+commands (get_config, save_config) in from it. See electron/main.js for
+the other side of this channel.
 
 Hold the hotkey (Right Ctrl on Windows, Right Option on Mac by default),
-speak, release.
+speak, release — the cleaned-up transcript is pasted automatically the
+moment it's ready, wherever the cursor was when dictation started. No
+review/confirm step: there is no window to click into or button to press.
 
 macOS note: the hotkey listener AND the paste injection need Accessibility
 permission granted to whatever runs this script (Terminal, or your Python
@@ -81,15 +83,15 @@ focus_target = None
 
 # ── Focus tracking ──
 #
-# The Electron UI auto-focuses its own transcript box the instant cleanup
-# finishes (so Enter-to-send/Esc-to-dismiss work immediately) -- but that
-# silently steals OS input focus away from wherever the user was actually
-# dictating into (a browser tab, Teams, a terminal). Left alone, the paste
-# keystroke in cmd_send_text() then lands on the Electron window itself,
-# not the target app, and the user sees nothing happen. Fix: snapshot
-# whichever window/app had focus the instant the hotkey was first pressed
-# (before any of that UI focus-stealing happens), and force focus back to
-# it immediately before pasting.
+# Transcribing + cleanup takes a few seconds, during which OS focus can
+# drift away from wherever the user was actually dictating into (a
+# notification steals it, they alt-tab to check something while waiting,
+# etc). paste_text() fires with zero confirmation step -- there's no
+# review UI moment where a human notices the wrong window is focused
+# before the paste keystroke goes out -- so this has to be handled
+# defensively: snapshot whichever window/app had focus the instant the
+# hotkey was first pressed, and force focus back to exactly that window
+# immediately before pasting, regardless of what focus has done since.
 
 def capture_focus_target():
     system = platform.system()
@@ -202,8 +204,11 @@ def get_config_dict():
     }
 
 
-def cmd_send_text(text):
-    """Paste the (possibly edited) text into the focused app."""
+def paste_text(text):
+    """Restore focus to wherever the user was dictating into, then paste the
+    cleaned-up text there. Called automatically the instant cleanup
+    finishes -- there is no review/confirm step, so this has to land
+    correctly the first time with no user action at all."""
     if not text or not text.strip():
         push_status("idle", IDLE_STATUS)
         return
@@ -217,13 +222,6 @@ def cmd_send_text(text):
     except Exception as exc:
         print(f"[inject] failed: {exc}", file=sys.stderr)
         push_status("error", f"Paste failed: {exc}")
-
-
-def cmd_dismiss():
-    """Dismiss the current transcript without pasting."""
-    restore_focus_target(focus_target)
-    push_status("idle", IDLE_STATUS)
-    emit_event({"type": "clear_editor"})
 
 
 def cmd_save_config(data):
@@ -259,11 +257,7 @@ def cmd_save_config(data):
 
 def handle_command(cmd):
     action = cmd.get("cmd")
-    if action == "send_text":
-        cmd_send_text(cmd.get("text", ""))
-    elif action == "dismiss":
-        cmd_dismiss()
-    elif action == "get_config":
+    if action == "get_config":
         emit_event(get_config_dict())
     elif action == "save_config":
         cmd_save_config(cmd.get("data", {}))
@@ -424,7 +418,7 @@ def stop_recording():
         cleaned = text
 
     push_final_text(cleaned)
-    push_status("review", "Edit if needed — Enter to send, Esc to dismiss")
+    paste_text(cleaned)
 
 
 # ── Hotkey ──

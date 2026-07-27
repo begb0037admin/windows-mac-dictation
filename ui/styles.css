@@ -245,22 +245,6 @@ body.pill-mode .app {
     0 0 20px rgba(108, 226, 182, 0.15);
 }
 
-/* Review is the one pill state that needs the user's attention — cleaned
-   text is waiting to be sent or dismissed — so it gets a distinct glow
-   rather than sharing transcribing/cleanup's plain cyan dot. */
-.app.state-review .pill-bar {
-  box-shadow:
-    0 3px 10px rgba(0, 0, 0, 0.18),
-    0 0 0 1px rgba(141, 216, 255, 0.5),
-    0 0 24px rgba(141, 216, 255, 0.25);
-  animation: pill-review-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes pill-review-pulse {
-  0%, 100% { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(141, 216, 255, 0.5), 0 0 24px rgba(141, 216, 255, 0.25); }
-  50% { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(141, 216, 255, 0.7), 0 0 32px rgba(141, 216, 255, 0.4); }
-}
-
 .pill-waveform {
   flex: 1;
   height: 28px;
@@ -280,8 +264,8 @@ body.pill-mode .app {
 
 /* Once recording stops, the waveform has nothing live to show — swap it for
    a short state label instead, so the mini pill never sits there silent
-   about what's actually happening (transcribing/cleaning up/ready to send)
-   while it's too small to show the full status text used elsewhere. */
+   about what's actually happening (transcribing/cleaning up/pasting) while
+   it's too small to show the full status text used elsewhere. */
 .pill-status {
   display: none;
   flex: 1;
@@ -295,43 +279,6 @@ body.pill-mode .app {
 
 .app:not(.state-idle):not(.state-recording) .pill-waveform { display: none; }
 .app:not(.state-idle):not(.state-recording) .pill-status { display: block; }
-
-/* Send/Dismiss controls, reachable without expanding back to Full mode —
-   review is the only pill state that needs them; hidden otherwise. */
-.pill-actions {
-  display: none;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.app.state-review .pill-actions { display: flex; }
-
-.pill-action-btn {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all var(--transition);
-}
-
-.pill-action-btn.dismiss {
-  background: rgba(248, 113, 113, 0.15);
-  color: var(--accent-red);
-}
-
-.pill-action-btn.dismiss:hover { background: rgba(248, 113, 113, 0.28); }
-
-.pill-action-btn.send {
-  background: rgba(108, 226, 182, 0.2);
-  color: var(--accent-green);
-}
-
-.pill-action-btn.send:hover { background: rgba(108, 226, 182, 0.35); }
 
 /* ── Status row (compact) ── */
 
@@ -392,8 +339,7 @@ body.pill-mode .app {
 }
 
 .app.state-transcribing .status-light,
-.app.state-cleanup .status-light,
-.app.state-review .status-light {
+.app.state-cleanup .status-light {
   background: var(--accent-cyan);
   box-shadow: 0 0 0 3px rgba(141, 216, 255, 0.2);
 }
@@ -473,15 +419,7 @@ body.pill-mode .app {
   border-color: rgba(108, 226, 182, 0.25);
 }
 
-.app.state-review .caption-panel {
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 0 2px rgba(141, 216, 255, 0.1);
-}
-
 .caption-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: 6px;
 }
 
@@ -491,12 +429,6 @@ body.pill-mode .app {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-}
-
-.caption-hint {
-  color: var(--ink-muted);
-  font-size: 10px;
-  font-style: italic;
 }
 
 .caption-text {
@@ -509,10 +441,6 @@ body.pill-mode .app {
   outline: none;
   user-select: text;
   -webkit-user-select: text;
-}
-
-.caption-text[contenteditable="true"] {
-  cursor: text;
 }
 
 .caption-text::-webkit-scrollbar { width: 4px; }
@@ -529,61 +457,6 @@ body.pill-mode .app {
 .caption-placeholder {
   color: var(--ink-muted);
   font-style: italic;
-}
-
-/* ── Action bar ── */
-
-.action-bar {
-  display: none;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.app.state-review .action-bar {
-  display: flex;
-}
-
-.action-btn {
-  flex: 1;
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elevated);
-  color: var(--ink-dim);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.action-btn:hover {
-  border-color: var(--border-active);
-  color: var(--ink);
-}
-
-.action-btn.send {
-  border-color: var(--accent-green);
-  color: var(--accent-green);
-  background: rgba(108, 226, 182, 0.08);
-}
-
-.action-btn.send:hover {
-  background: rgba(108, 226, 182, 0.15);
-  color: #fff;
-}
-
-.theme-light .action-btn.send:hover {
-  color: var(--accent-green);
-}
-
-.action-btn.dismiss:hover {
-  border-color: var(--accent-red);
-  color: var(--accent-red);
 }
 
 /* ── Settings View ── */

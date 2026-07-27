@@ -8,7 +8,7 @@
 
 // ── State ──
 
-const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'review', 'pasting', 'error'];
+const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'pasting', 'error'];
 let currentState = 'idle';
 let waveformBars = [];
 let pillBars = [];
@@ -24,18 +24,12 @@ function cacheDom() {
     app: document.querySelector('.app'),
     statusLight: document.getElementById('statusLight'),
     captionText: document.getElementById('captionText'),
-    captionHint: document.getElementById('captionHint'),
     hotkeyLabel: document.getElementById('hotkeyLabel'),
     hotkeyKey: document.getElementById('hotkeyKey'),
     waveform: document.getElementById('waveform'),
     pillWaveform: document.getElementById('pillWaveform'),
     pillStatus: document.getElementById('pillStatus'),
-    pillActions: document.getElementById('pillActions'),
     flash: document.getElementById('flash'),
-    btnSend: document.getElementById('btnSend'),
-    btnDismiss: document.getElementById('btnDismiss'),
-    btnPillSend: document.getElementById('btnPillSend'),
-    btnPillDismiss: document.getElementById('btnPillDismiss'),
     btnPill: document.getElementById('btnPill'),
     btnClose: document.getElementById('btnClose'),
     // Views
@@ -124,20 +118,19 @@ function resetWaveform() {
 
 // ── State management ──
 
-// Short labels for the mini pill's status text — the full status text (e.g.
-// "Edit if needed — Enter to send, Esc to dismiss") is too long for a
-// 170px-wide pill, so this is a separate, deliberately terse mapping.
+// Short labels for the mini pill's status text — the full status text is
+// too long for a 170px-wide pill, so this is a separate, deliberately
+// terse mapping.
 const PILL_STATUS_TEXT = {
   transcribing: 'Transcribing…',
   cleanup: 'Cleaning up…',
-  review: 'Ready to send',
   pasting: 'Pasting…',
   error: 'Error',
 };
 
 /**
  * Called from Python to update the app state.
- * @param {string} state - One of: idle, recording, transcribing, cleanup, review, pasting, error
+ * @param {string} state - One of: idle, recording, transcribing, cleanup, pasting, error
  * @param {string} text - Status text, shown as the status light's hover tooltip
  */
 function updateStatus(state, text) {
@@ -149,24 +142,6 @@ function updateStatus(state, text) {
 
   if (dom.statusLight) dom.statusLight.title = text;
   if (dom.pillStatus) dom.pillStatus.textContent = PILL_STATUS_TEXT[state] || '';
-
-  // Review state: make text editable, allow Enter to send / Esc to dismiss
-  if (state === 'review') {
-    dom.captionText.setAttribute('contenteditable', 'true');
-    if (dom.captionHint) dom.captionHint.textContent = 'Enter to send • Esc to dismiss';
-    setTimeout(() => {
-      dom.captionText.focus();
-      const range = document.createRange();
-      const sel = window.getSelection();
-      range.selectNodeContents(dom.captionText);
-      range.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }, 50);
-  } else {
-    dom.captionText.setAttribute('contenteditable', 'false');
-    if (dom.captionHint) dom.captionHint.textContent = '';
-  }
 
   if (state === 'idle') {
     resetWaveform();
@@ -198,48 +173,6 @@ function updateFinalText(text) {
   if (text && text.trim() !== '') {
     dom.captionText.textContent = text;
     dom.captionText.scrollTop = dom.captionText.scrollHeight;
-  }
-}
-
-function clearEditor() {
-  updateTranscript('');
-}
-
-// ── Send / Dismiss ──
-
-async function sendText() {
-  const text = dom.captionText.innerText || dom.captionText.textContent || '';
-  if (!text.trim() || text.includes('Waiting for speech...')) return;
-
-  if (window.electronAPI) {
-    window.electronAPI.sendCommand({ cmd: 'send_text', text: text.trim() });
-  } else if (window.pywebview && window.pywebview.api) {
-    try {
-      await pywebview.api.send_text(text.trim());
-    } catch (e) {
-      console.error('Failed to send text:', e);
-    }
-  } else {
-    updateStatus('pasting', 'Pasting...');
-    setTimeout(() => {
-      updateStatus('idle', 'Ready');
-      updateTranscript('');
-    }, 1200);
-  }
-}
-
-async function dismissText() {
-  if (window.electronAPI) {
-    window.electronAPI.sendCommand({ cmd: 'dismiss' });
-  } else if (window.pywebview && window.pywebview.api) {
-    try {
-      await pywebview.api.dismiss();
-    } catch (e) {
-      console.error('Failed to dismiss:', e);
-    }
-  } else {
-    updateStatus('idle', 'Ready');
-    updateTranscript('');
   }
 }
 
@@ -482,9 +415,6 @@ function handleBackendEvent(event) {
     case 'audio_level':
       updateAudioLevel(event.rms);
       break;
-    case 'clear_editor':
-      clearEditor();
-      break;
     case 'ready':
       setHotkeyDisplay(event.hotkey_raw, event.hotkey_display);
       break;
@@ -542,12 +472,6 @@ function init() {
     }
   });
 
-  // Action buttons
-  if (dom.btnSend) dom.btnSend.addEventListener('click', sendText);
-  if (dom.btnDismiss) dom.btnDismiss.addEventListener('click', dismissText);
-  if (dom.btnPillSend) dom.btnPillSend.addEventListener('click', sendText);
-  if (dom.btnPillDismiss) dom.btnPillDismiss.addEventListener('click', dismissText);
-
   // Settings listeners
   if (dom.settingTheme) {
     dom.settingTheme.addEventListener('click', () => {
@@ -576,19 +500,6 @@ function init() {
       saveSettings();
     });
   }
-
-  // Keyboard shortcuts (Enter to send, Esc to dismiss in review state)
-  window.addEventListener('keydown', (e) => {
-    if (currentState === 'review') {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendText();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        dismissText();
-      }
-    }
-  });
 
   // Set initial state
   updateStatus('idle', 'Initialising...');
@@ -656,7 +567,8 @@ function runDemoMode() {
 
         setTimeout(() => {
           updateFinalText(demoText);
-          updateStatus('review', 'Edit if needed — Enter to send, Esc to dismiss');
+          updateStatus('pasting', 'Pasting...');
+          setTimeout(() => updateStatus('idle', 'Ready'), 1000);
         }, 1200);
       }, 1500);
     }, 4000);
