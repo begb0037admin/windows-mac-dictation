@@ -18,6 +18,7 @@ Without it, pynput silently receives no key events, and pyautogui's paste
 keystroke silently does nothing.
 """
 
+import ctypes
 import json
 import os
 import platform
@@ -69,6 +70,52 @@ stream = None
 partial_stop_event = None
 
 window = None  # pywebview window reference
+
+IS_WINDOWS = platform.system() == "Windows"
+
+
+# ── Window shape (Windows) ──
+#
+# pywebview's transparent=True on Windows only makes the WebView2 control's
+# own background see-through (webview/platforms/edgechromium.py) — the
+# WinForms Form that hosts it never gets an explicit background color in that
+# code path, so it falls back to the OS's default control grey. That's the
+# grey box/border around a frameless+transparent window on Windows. Real
+# per-pixel desktop transparency isn't reliably available through
+# WinForms/EdgeChromium, so instead of fighting it, the window is given a
+# real OS-level shape: DWM's native rounded corners for the Full view, and a
+# GDI capsule region for Pill mode — solid background, no transparency
+# needed. macOS keeps transparent=True/vibrancy=True, which Cocoa handles
+# natively (see webview.create_window() in main()).
+if IS_WINDOWS:
+    DWMWA_BORDER_COLOR = 34
+    DWMWA_COLOR_NONE = 0xFFFFFFFE
+    DWMWA_WINDOW_CORNER_PREFERENCE = 33
+    DWMWCP_ROUND = 2
+
+    def _dwm_set_attribute(hwnd, attr, value):
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, attr, ctypes.byref(ctypes.c_int(value)), ctypes.sizeof(ctypes.c_int)
+        )
+
+    def apply_window_shape(is_pill):
+        """Shape the frameless window: a GDI capsule region in Pill mode,
+        native DWM rounded corners in Full mode. Called after every resize."""
+        if not window or not window.native:
+            return
+        hwnd = window.native.Handle.ToInt32()
+        _dwm_set_attribute(hwnd, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE)
+        if is_pill:
+            w, h = int(window.width), int(window.height)
+            region = ctypes.windll.gdi32.CreateRoundRectRgn(0, 0, w + 1, h + 1, h, h)
+            if not ctypes.windll.user32.SetWindowRgn(hwnd, region, True):
+                ctypes.windll.gdi32.DeleteObject(region)
+        else:
+            ctypes.windll.user32.SetWindowRgn(hwnd, None, True)
+            _dwm_set_attribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)
+else:
+    def apply_window_shape(is_pill):
+        pass
 
 
 # ── UI bridge ──
@@ -134,14 +181,30 @@ class DictationAPI:
             "opacity": config.get("opacity", "glass"),
         }
 
-    def set_window_size(self, width, height):
-        """Dynamically resize window for Pill mode / Full mode."""
+    def set_window_size(self, width, height, pill=False):
+        """Dynamically resize window for Pill mode / Full mode, then
+        reapply the window's OS-level shape (see apply_window_shape)."""
         if window:
             try:
                 window.resize(int(width), int(height))
+                apply_window_shape(bool(pill))
                 return True
             except Exception as e:
                 print(f"[window] resize failed: {e}", file=sys.stderr)
+        return False
+
+    def move_window_by(self, dx, dy):
+        """Move the window by a relative screen offset. Drives the custom
+        drag handling in app.js — -webkit-app-region: drag isn't reliably
+        honoured by pywebview's Windows/WebView2 backend, and easy_drag is
+        deliberately off so drag-anywhere doesn't fight text selection in
+        the editable transcript."""
+        if window:
+            try:
+                window.move(window.x + int(dx), window.y + int(dy))
+                return True
+            except Exception as e:
+                print(f"[window] move failed: {e}", file=sys.stderr)
         return False
 
     def close_window(self):
@@ -368,6 +431,7 @@ def on_window_loaded():
     # Set the hotkey display
     push_js(f"setHotkeyDisplay({json.dumps(HOTKEY_NAME)}, {json.dumps(HOTKEY_DISPLAY)})")
     push_status("idle", IDLE_STATUS)
+    apply_window_shape(is_pill=False)
 
 
 def on_window_closing():
@@ -449,8 +513,9 @@ def main():
         height=360,
         min_size=(200, 44),
         frameless=True,
-        transparent=True,
-        vibrancy=True,
+        transparent=not IS_WINDOWS,
+        vibrancy=not IS_WINDOWS,
+        background_color="#111827",
         easy_drag=False,
     )
 

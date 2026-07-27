@@ -46,6 +46,8 @@ function cacheDom() {
     viewSettings: document.getElementById('viewSettings'),
     btnSettings: document.getElementById('btnSettings'),
     btnBack: document.getElementById('btnBack'),
+    appHeader: document.getElementById('appHeader'),
+    pillBar: document.querySelector('.pill-bar'),
     // Settings fields
     settingTheme: document.getElementById('settingTheme'),
     settingOpacity: document.getElementById('settingOpacity'),
@@ -250,9 +252,10 @@ async function dismissText() {
 async function enablePillMode() {
   isPillMode = true;
   dom.app.classList.add('mode-pill');
+  document.body.classList.add('pill-mode');
   if (window.pywebview && window.pywebview.api) {
     try {
-      await pywebview.api.set_window_size(260, 44);
+      await pywebview.api.set_window_size(340, 56, true);
     } catch (e) {
       console.error('Failed to resize window to pill mode:', e);
     }
@@ -262,14 +265,61 @@ async function enablePillMode() {
 async function disablePillMode() {
   isPillMode = false;
   dom.app.classList.remove('mode-pill');
+  document.body.classList.remove('pill-mode');
   showDictation();
   if (window.pywebview && window.pywebview.api) {
     try {
-      await pywebview.api.set_window_size(400, 360);
+      await pywebview.api.set_window_size(400, 360, false);
     } catch (e) {
       console.error('Failed to resize window to full mode:', e);
     }
   }
+}
+
+// ── Window drag ──
+//
+// The window is frameless with easy_drag off (drag-anywhere would fight
+// text selection in the editable transcript), and -webkit-app-region: drag
+// isn't reliably honoured by pywebview's Windows/WebView2 backend. So drag
+// is driven explicitly here, scoped to the header and pill bar only, via
+// DictationAPI.move_window_by() on the Python side.
+
+function initDrag() {
+  const targets = [dom.appHeader, dom.pillBar].filter(Boolean);
+  if (!targets.length) return;
+
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+
+  function onMouseDown(e) {
+    if (e.button !== 0) return;
+    if (e.target.closest('button, input, select, [contenteditable="true"]')) return;
+    dragging = true;
+    lastX = e.screenX;
+    lastY = e.screenY;
+    e.preventDefault();
+  }
+
+  function onMouseMove(e) {
+    if (!dragging) return;
+    const dx = e.screenX - lastX;
+    const dy = e.screenY - lastY;
+    if (dx === 0 && dy === 0) return;
+    lastX = e.screenX;
+    lastY = e.screenY;
+    if (window.pywebview && window.pywebview.api) {
+      pywebview.api.move_window_by(dx, dy);
+    }
+  }
+
+  function onMouseUp() {
+    dragging = false;
+  }
+
+  targets.forEach((el) => el.addEventListener('mousedown', onMouseDown));
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
 }
 
 // ── Flash notification ──
@@ -383,6 +433,7 @@ function setHotkeyDisplay(name, display) {
 function init() {
   cacheDom();
   initWaveform();
+  initDrag();
 
   // Restore saved appearance early
   const savedTheme = localStorage.getItem('dictation_theme');
