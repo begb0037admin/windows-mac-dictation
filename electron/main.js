@@ -16,16 +16,28 @@ ipcMain.on('move-window-by', (event, dx, dy) => {
   win.setPosition(x + Math.round(dx), y + Math.round(dy));
 });
 
+ipcMain.on('resize-window', (event, width, height) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  win.setBounds({ width: Math.round(width), height: Math.round(height) });
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 400,
     height: 360,
-    minWidth: 200,
+    minWidth: 140,
     minHeight: 44,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    hasShadow: true,
+    // Electron's native OS-level window shadow (hasShadow) follows the
+    // window's actual rectangular frame on Windows, not the CSS rounded/
+    // capsule content shape — invisible against a dark desktop, but shows
+    // as a clearly visible grey square behind the rounded UI against a
+    // light one. The CSS box-shadow (styles.css, properly clipped to the
+    // rounded shape) supplies the drop shadow instead.
+    hasShadow: false,
     resizable: false,
     show: false,
     webPreferences: {
@@ -39,6 +51,11 @@ function createWindow() {
     visualEffectState: 'active',
     roundedCorners: true,
   });
+
+  // Belt-and-suspenders: the constructor's hasShadow:false option should be
+  // enough, but call it explicitly too in case that option doesn't fully
+  // apply on this Electron/Windows combination.
+  win.setHasShadow(false);
 
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));

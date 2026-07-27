@@ -251,9 +251,11 @@ async function enablePillMode() {
   isPillMode = true;
   dom.app.classList.add('mode-pill');
   document.body.classList.add('pill-mode');
-  if (window.pywebview && window.pywebview.api) {
+  if (window.electronAPI) {
+    window.electronAPI.resizeWindow(170, 56);
+  } else if (window.pywebview && window.pywebview.api) {
     try {
-      await pywebview.api.set_window_size(340, 56, true);
+      await pywebview.api.set_window_size(170, 56, true);
     } catch (e) {
       console.error('Failed to resize window to pill mode:', e);
     }
@@ -265,7 +267,9 @@ async function disablePillMode() {
   dom.app.classList.remove('mode-pill');
   document.body.classList.remove('pill-mode');
   showDictation();
-  if (window.pywebview && window.pywebview.api) {
+  if (window.electronAPI) {
+    window.electronAPI.resizeWindow(400, 360);
+  } else if (window.pywebview && window.pywebview.api) {
     try {
       await pywebview.api.set_window_size(400, 360, false);
     } catch (e) {

@@ -104,8 +104,7 @@ body.pill-mode {
   height: calc(100vh - 32px); /* account for body margin */
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--border);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 body.pill-mode .app {
@@ -237,25 +236,21 @@ body.pill-mode .app {
   gap: 14px;
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(32, 36, 48, 0.98), rgba(15, 18, 26, 0.98));
-  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 14px 32px rgba(0, 0, 0, 0.5),
-    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 3px 10px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   cursor: move;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  transition: box-shadow var(--transition);
 }
 
 .theme-light .pill-bar {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(240, 244, 248, 0.98));
-  border-color: rgba(0, 0, 0, 0.08);
 }
 
 .app.state-recording .pill-bar {
-  border-color: rgba(108, 226, 182, 0.35);
   box-shadow:
-    0 14px 32px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(108, 226, 182, 0.12),
+    0 3px 10px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(108, 226, 182, 0.35),
     0 0 20px rgba(108, 226, 182, 0.15);
 }
 
@@ -263,17 +258,16 @@ body.pill-mode .app {
    text is waiting to be sent or dismissed — so it gets a distinct glow
    rather than sharing transcribing/cleanup's plain cyan dot. */
 .app.state-review .pill-bar {
-  border-color: rgba(141, 216, 255, 0.5);
   box-shadow:
-    0 14px 32px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(141, 216, 255, 0.2),
+    0 3px 10px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(141, 216, 255, 0.5),
     0 0 24px rgba(141, 216, 255, 0.25);
   animation: pill-review-pulse 1.8s ease-in-out infinite;
 }
 
 @keyframes pill-review-pulse {
-  0%, 100% { box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(141, 216, 255, 0.2), 0 0 24px rgba(141, 216, 255, 0.25); }
-  50% { box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(141, 216, 255, 0.4), 0 0 32px rgba(141, 216, 255, 0.4); }
+  0%, 100% { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(141, 216, 255, 0.5), 0 0 24px rgba(141, 216, 255, 0.25); }
+  50% { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(141, 216, 255, 0.7), 0 0 32px rgba(141, 216, 255, 0.4); }
 }
 
 .pill-waveform {

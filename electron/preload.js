@@ -10,4 +10,5 @@ const { contextBridge, ipcRenderer } = require('electron');
 // itself via mousedown/mousemove, calling this.
 contextBridge.exposeInMainWorld('electronAPI', {
   moveWindowBy: (dx, dy) => ipcRenderer.send('move-window-by', dx, dy),
+  resizeWindow: (width, height) => ipcRenderer.send('resize-window', width, height),
 });
