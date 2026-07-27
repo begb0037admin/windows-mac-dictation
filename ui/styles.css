@@ -47,10 +47,6 @@
   --shadow-brand: 0 8px 20px rgba(0, 0, 0, 0.1);
 }
 
-.theme-light .brand-mark {
-  background: linear-gradient(135deg, #1a2332, var(--accent-blue));
-}
-
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
@@ -140,14 +136,9 @@ body.pill-mode .app {
 .brand-mark {
   width: 26px;
   height: 26px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  color: #ffffff;
-  background: linear-gradient(135deg, #111827, var(--accent-blue));
+  display: block;
+  border-radius: 6px;
   box-shadow: var(--shadow-brand);
-  font-weight: 900;
-  font-size: 12px;
 }
 
 .header-actions {
@@ -320,63 +311,44 @@ body.pill-mode .app {
   background: rgba(0, 0, 0, 0.08);
 }
 
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-dim);
-  transition: color var(--transition);
-  min-width: 0;
-  overflow: hidden;
-}
-
-.status-indicator span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-dot {
-  width: 7px;
-  height: 7px;
+/* Ready/error notification light, next to the hotkey badge. Idle reads as
+   "ready" (green) per Kevin's ask; mid-pipeline states keep the richer
+   color coding that was already built (green while recording/pasting,
+   cyan while processing); error is red. Hover for the state text
+   (updateStatus() sets the title attribute). */
+.status-light {
+  width: 12px;
+  height: 12px;
   border-radius: 99px;
   background: var(--ink-muted);
   flex-shrink: 0;
   transition: all var(--transition);
 }
 
-/* State-specific status styling */
-.app.state-recording .status-indicator { color: var(--accent-green); }
-.app.state-recording .status-dot {
+.app.state-idle .status-light {
+  background: var(--accent-green);
+  box-shadow: 0 0 0 3px rgba(108, 226, 182, 0.15);
+}
+
+.app.state-recording .status-light {
   background: var(--accent-green);
   box-shadow: 0 0 0 3px rgba(108, 226, 182, 0.2), 0 0 10px rgba(108, 226, 182, 0.3);
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
 
-.app.state-transcribing .status-indicator,
-.app.state-cleanup .status-indicator { color: var(--accent-cyan); }
-.app.state-transcribing .status-dot,
-.app.state-cleanup .status-dot {
+.app.state-transcribing .status-light,
+.app.state-cleanup .status-light,
+.app.state-review .status-light {
   background: var(--accent-cyan);
   box-shadow: 0 0 0 3px rgba(141, 216, 255, 0.2);
 }
 
-.app.state-review .status-indicator { color: var(--accent-cyan); }
-.app.state-review .status-dot {
-  background: var(--accent-cyan);
-  box-shadow: 0 0 0 3px rgba(141, 216, 255, 0.2);
-}
-
-.app.state-pasting .status-indicator { color: var(--accent-green); }
-.app.state-pasting .status-dot {
+.app.state-pasting .status-light {
   background: var(--accent-green);
   box-shadow: 0 0 0 3px rgba(108, 226, 182, 0.2);
 }
 
-.app.state-error .status-indicator { color: var(--accent-red); }
-.app.state-error .status-dot {
+.app.state-error .status-light {
   background: var(--accent-red);
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
 }
@@ -557,46 +529,6 @@ body.pill-mode .app {
 .action-btn.dismiss:hover {
   border-color: var(--accent-red);
   color: var(--accent-red);
-}
-
-/* ── Status cells ── */
-
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-
-.status-cell {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elevated);
-  transition: all var(--transition);
-}
-
-.status-cell strong {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.status-cell span {
-  color: var(--ink-muted);
-  font-size: 10px;
-}
-
-.status-cell.active {
-  border-color: rgba(108, 226, 182, 0.3);
-  background: rgba(108, 226, 182, 0.06);
-}
-
-.status-cell.active span {
-  color: var(--accent-green);
-}
-
-@media (max-height: 350px) {
-  .status-grid { display: none; }
 }
 
 /* ── Settings View ── */

@@ -21,7 +21,7 @@ let dom = {};
 function cacheDom() {
   dom = {
     app: document.querySelector('.app'),
-    statusText: document.getElementById('statusText'),
+    statusLight: document.getElementById('statusLight'),
     captionText: document.getElementById('captionText'),
     captionHint: document.getElementById('captionHint'),
     hotkeyLabel: document.getElementById('hotkeyLabel'),
@@ -33,11 +33,6 @@ function cacheDom() {
     btnDismiss: document.getElementById('btnDismiss'),
     btnPill: document.getElementById('btnPill'),
     btnClose: document.getElementById('btnClose'),
-    // Status cells
-    cellCapture: document.getElementById('cellCapture'),
-    cellWhisper: document.getElementById('cellWhisper'),
-    cellCleanup: document.getElementById('cellCleanup'),
-    cellPaste: document.getElementById('cellPaste'),
     // Views
     viewDictation: document.getElementById('viewDictation'),
     viewPill: document.getElementById('viewPill'),
@@ -127,7 +122,7 @@ function resetWaveform() {
 /**
  * Called from Python to update the app state.
  * @param {string} state - One of: idle, recording, transcribing, cleanup, review, pasting, error
- * @param {string} text - Status text to display
+ * @param {string} text - Status text, shown as the status light's hover tooltip
  */
 function updateStatus(state, text) {
   for (const s of STATES) {
@@ -136,8 +131,7 @@ function updateStatus(state, text) {
   dom.app.classList.add(`state-${state}`);
   currentState = state;
 
-  dom.statusText.textContent = text;
-  updateCells(state);
+  if (dom.statusLight) dom.statusLight.title = text;
 
   // Review state: make text editable, allow Enter to send / Esc to dismiss
   if (state === 'review') {
@@ -168,26 +162,9 @@ function updateStatus(state, text) {
   if (state === 'error') {
     setTimeout(() => {
       if (currentState === 'error') {
-        updateStatus('idle', dom.hotkeyLabel.dataset.idleText || 'Hold hotkey to record');
+        updateStatus('idle', 'Ready');
       }
     }, 4000);
-  }
-}
-
-function updateCells(state) {
-  const cells = [dom.cellCapture, dom.cellWhisper, dom.cellCleanup, dom.cellPaste];
-  cells.forEach(c => c.classList.remove('active'));
-
-  const cellStates = {
-    'recording': [dom.cellCapture],
-    'transcribing': [dom.cellWhisper],
-    'cleanup': [dom.cellCleanup],
-    'review': [dom.cellCleanup],
-    'pasting': [dom.cellPaste],
-  };
-
-  if (cellStates[state]) {
-    cellStates[state].forEach(c => c.classList.add('active'));
   }
 }
 
@@ -226,7 +203,7 @@ async function sendText() {
   } else {
     updateStatus('pasting', 'Pasting...');
     setTimeout(() => {
-      updateStatus('idle', dom.hotkeyLabel.dataset.idleText || 'Hold hotkey to record');
+      updateStatus('idle', 'Ready');
       updateTranscript('');
     }, 1200);
   }
@@ -240,7 +217,7 @@ async function dismissText() {
       console.error('Failed to dismiss:', e);
     }
   } else {
-    updateStatus('idle', dom.hotkeyLabel.dataset.idleText || 'Hold hotkey to record');
+    updateStatus('idle', 'Ready');
     updateTranscript('');
   }
 }
@@ -441,8 +418,6 @@ async function saveSettings() {
 
 function setHotkeyDisplay(name, display) {
   if (dom.hotkeyKey) dom.hotkeyKey.textContent = display;
-  const idleText = `Hold ${display} to record`;
-  if (dom.hotkeyLabel) dom.hotkeyLabel.dataset.idleText = idleText;
 }
 
 // ── Initialisation ──

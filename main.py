@@ -506,7 +506,7 @@ def main():
 
     api = DictationAPI()
     window = webview.create_window(
-        "Dictation",
+        "Push 2 Talk",
         url=str(UI_DIR / "index.html"),
         js_api=api,
         width=400,
