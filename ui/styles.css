@@ -723,6 +723,21 @@ select.field option {
   transform: translateX(-50%) translateY(0);
 }
 
+/* The 50px top offset above is sized for the 360px-tall Full view and
+   clips against the window's own physical edge in the 56px-tall Mini
+   Pill -- paste can now fire while sitting in Pill mode (full
+   auto-send doesn't require Full view to be open), so this is reachable
+   in normal use, not just an edge case. Pill mode centers the flash
+   vertically instead, which fits regardless of the pill's exact height. */
+body.pill-mode .flash {
+  top: 50%;
+  transform: translate(-50%, calc(-50% - 6px));
+}
+
+body.pill-mode .flash.show {
+  transform: translate(-50%, -50%);
+}
+
 /* ── Spinner ── */
 
 .spinner {
