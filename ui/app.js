@@ -26,14 +26,12 @@ function cacheDom() {
     captionHint: document.getElementById('captionHint'),
     hotkeyLabel: document.getElementById('hotkeyLabel'),
     hotkeyKey: document.getElementById('hotkeyKey'),
-    pillHotkey: document.getElementById('pillHotkey'),
     waveform: document.getElementById('waveform'),
     pillWaveform: document.getElementById('pillWaveform'),
     flash: document.getElementById('flash'),
     btnSend: document.getElementById('btnSend'),
     btnDismiss: document.getElementById('btnDismiss'),
     btnPill: document.getElementById('btnPill'),
-    btnExpand: document.getElementById('btnExpand'),
     btnClose: document.getElementById('btnClose'),
     // Status cells
     cellCapture: document.getElementById('cellCapture'),
@@ -278,26 +276,36 @@ async function disablePillMode() {
 
 // ── Window drag ──
 //
-// The window is frameless with easy_drag off (drag-anywhere would fight
-// text selection in the editable transcript), and -webkit-app-region: drag
-// isn't reliably honoured by pywebview's Windows/WebView2 backend. So drag
-// is driven explicitly here, scoped to the header and pill bar only, via
-// DictationAPI.move_window_by() on the Python side.
+// -webkit-app-region: drag regions never dispatch normal DOM mouse events
+// to JS at all (Chromium routes them straight to native window-move
+// handling) — fine for pure dragging, but it means a drag region can never
+// also be a click target. Since the pill has no expand button (only the
+// waveform is visible — a plain click on it expands back to Full mode),
+// .header/.pill-bar are plain elements instead, and movement is driven
+// here via mousedown/mousemove, through window.electronAPI.moveWindowBy()
+// (exposed by preload.js). Click-vs-drag is distinguished by total pointer
+// movement since mousedown: below CLICK_THRESHOLD_PX counts as a click.
+
+const CLICK_THRESHOLD_PX = 4;
 
 function initDrag() {
   const targets = [dom.appHeader, dom.pillBar].filter(Boolean);
   if (!targets.length) return;
 
   let dragging = false;
+  let startEl = null;
   let lastX = 0;
   let lastY = 0;
+  let totalMove = 0;
 
   function onMouseDown(e) {
     if (e.button !== 0) return;
     if (e.target.closest('button, input, select, [contenteditable="true"]')) return;
     dragging = true;
+    startEl = e.currentTarget;
     lastX = e.screenX;
     lastY = e.screenY;
+    totalMove = 0;
     e.preventDefault();
   }
 
@@ -308,13 +316,19 @@ function initDrag() {
     if (dx === 0 && dy === 0) return;
     lastX = e.screenX;
     lastY = e.screenY;
-    if (window.pywebview && window.pywebview.api) {
-      pywebview.api.move_window_by(dx, dy);
+    totalMove += Math.abs(dx) + Math.abs(dy);
+    if (window.electronAPI) {
+      window.electronAPI.moveWindowBy(dx, dy);
     }
   }
 
   function onMouseUp() {
+    if (!dragging) return;
+    if (startEl === dom.pillBar && totalMove < CLICK_THRESHOLD_PX && isPillMode) {
+      disablePillMode();
+    }
     dragging = false;
+    startEl = null;
   }
 
   targets.forEach((el) => el.addEventListener('mousedown', onMouseDown));
@@ -423,7 +437,6 @@ async function saveSettings() {
 
 function setHotkeyDisplay(name, display) {
   if (dom.hotkeyKey) dom.hotkeyKey.textContent = display;
-  if (dom.pillHotkey) dom.pillHotkey.textContent = display;
   const idleText = `Hold ${display} to record`;
   if (dom.hotkeyLabel) dom.hotkeyLabel.dataset.idleText = idleText;
 }
@@ -460,7 +473,6 @@ function init() {
   }
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
-  if (dom.btnExpand) dom.btnExpand.addEventListener('click', disablePillMode);
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
     if (window.pywebview && window.pywebview.api) {
       await pywebview.api.close_window();

@@ -1,0 +1,13 @@
+{
+  "name": "dictation-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell spike for the windows-mac-dictation Mini Float UI (Phase 1: shape/border/drag proof, no Python IPC yet).",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "43.2.0"
+  }
+}

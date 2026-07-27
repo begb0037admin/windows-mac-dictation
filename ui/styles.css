@@ -123,7 +123,7 @@ body.pill-mode .app {
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.4);
   backdrop-filter: blur(12px);
-  -webkit-app-region: drag;
+  cursor: move;
 }
 
 .theme-light .header {
@@ -155,7 +155,6 @@ body.pill-mode .app {
   display: flex;
   align-items: center;
   gap: 6px;
-  -webkit-app-region: no-drag;
 }
 
 .icon-btn {
@@ -205,6 +204,17 @@ body.pill-mode .app {
   flex-direction: column;
 }
 
+.content::-webkit-scrollbar { width: 4px; }
+.content::-webkit-scrollbar-track { background: transparent; }
+.content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 99px;
+}
+
+.theme-light .content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+
 /* ── Views ── */
 
 .view { display: none; }
@@ -234,7 +244,6 @@ body.pill-mode .app {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   cursor: move;
   transition: border-color var(--transition), box-shadow var(--transition);
-  -webkit-app-region: drag;
 }
 
 .theme-light .pill-bar {
@@ -267,21 +276,6 @@ body.pill-mode .app {
   50% { box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(141, 216, 255, 0.4), 0 0 32px rgba(141, 216, 255, 0.4); }
 }
 
-.pill-bar .status-dot {
-  width: 9px;
-  height: 9px;
-  flex-shrink: 0;
-}
-
-.pill-hotkey {
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--ink-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-}
-
 .pill-waveform {
   flex: 1;
   height: 28px;
@@ -297,26 +291,6 @@ body.pill-mode .app {
   min-height: 3px;
   max-width: 3px;
   border-radius: 99px;
-}
-
-.pill-bar .icon-btn {
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.pill-bar .icon-btn.mini {
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-}
-
-/* Signal that the pill wants attention: swap the expand icon's resting
-   look during review so it visibly reads as "your turn", not just
-   "grow the window". */
-.app.state-review .pill-bar .icon-btn.mini {
-  border-color: var(--accent-cyan);
-  color: var(--accent-cyan);
-  background: rgba(141, 216, 255, 0.12);
 }
 
 /* ── Status row (compact) ── */
