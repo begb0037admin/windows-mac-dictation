@@ -31,6 +31,8 @@ DEFAULTS = {
         "ollama_url": "http://localhost:11434/api/generate",
     },
     "autostart": False,
+    "theme": "dark",
+    "opacity": "glass",
 }
 
 
@@ -85,4 +87,6 @@ def load_config():
         "whisper": merged["whisper"][CURRENT_PLATFORM],
         "cleanup": merged["cleanup"],
         "autostart": merged["autostart"],
+        "theme": merged["theme"],
+        "opacity": merged["opacity"],
     }

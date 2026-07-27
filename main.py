@@ -3,10 +3,12 @@ Full MVP pipeline: push-to-talk hotkey + audio capture + transcription +
 Ollama cleanup + clipboard paste injection. Cross-platform (Windows + macOS)
 via pynput, sounddevice, transcribe.py, cleanup.py, and inject.py.
 
-UI is a pywebview window rendering ui/index.html — a dark-themed web UI
-with a live-updating waveform and partial transcript while you hold the
-hotkey, purely for feedback. The real text only gets pasted into whatever
-app has focus once, cleanly, on release. Closing the window quits the app.
+This process owns no window at all — the UI is the Electron shell in
+electron/, which spawns this script as a child process and speaks to it
+over stdio: one JSON object per line. Stdout carries events (state
+changes, transcript updates, audio levels) out to the UI; stdin carries
+commands (send_text, dismiss, get_config, save_config) in from it. See
+electron/main.js for the other side of this channel.
 
 Hold the hotkey (Right Ctrl on Windows, Right Option on Mac by default),
 speak, release.
@@ -18,18 +20,14 @@ Without it, pynput silently receives no key events, and pyautogui's paste
 keystroke silently does nothing.
 """
 
-import ctypes
 import json
-import os
 import platform
 import sys
 import threading
 from pathlib import Path
 
 import numpy as np
-import pyperclip
 import sounddevice as sd
-import webview
 from pynput import keyboard
 
 from cleanup import cleanup
@@ -37,11 +35,18 @@ from config import load_config
 from inject import inject
 from transcribe import transcribe
 
+# Capture the real stdout before anything else touches it, then redirect
+# sys.stdout to stderr — every existing print() in this file (and any
+# third-party progress-bar output from faster-whisper/huggingface_hub that
+# writes to sys.stdout rather than sys.stderr) keeps working unchanged, but
+# now lands on stderr instead of corrupting the JSON-lines event stream.
+# Only emit_event() below writes to the real stdout, deliberately.
+_event_stream = sys.stdout
+sys.stdout = sys.stderr
+
 config = load_config()
 SAMPLE_RATE = config["sample_rate"]
 HOTKEY_NAME = config["hotkey"]
-
-UI_DIR = Path(__file__).parent / "ui"
 
 
 def resolve_hotkey(name):
@@ -69,204 +74,146 @@ frames = []
 stream = None
 partial_stop_event = None
 
-window = None  # pywebview window reference
 
-IS_WINDOWS = platform.system() == "Windows"
+# ── Event stream (Python -> Electron, stdout) ──
 
-
-# ── Window shape (Windows) ──
-#
-# pywebview's transparent=True on Windows only makes the WebView2 control's
-# own background see-through (webview/platforms/edgechromium.py) — the
-# WinForms Form that hosts it never gets an explicit background color in that
-# code path, so it falls back to the OS's default control grey. That's the
-# grey box/border around a frameless+transparent window on Windows. Real
-# per-pixel desktop transparency isn't reliably available through
-# WinForms/EdgeChromium, so instead of fighting it, the window is given a
-# real OS-level shape: DWM's native rounded corners for the Full view, and a
-# GDI capsule region for Pill mode — solid background, no transparency
-# needed. macOS keeps transparent=True/vibrancy=True, which Cocoa handles
-# natively (see webview.create_window() in main()).
-if IS_WINDOWS:
-    DWMWA_BORDER_COLOR = 34
-    DWMWA_COLOR_NONE = 0xFFFFFFFE
-    DWMWA_WINDOW_CORNER_PREFERENCE = 33
-    DWMWCP_ROUND = 2
-
-    def _dwm_set_attribute(hwnd, attr, value):
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, attr, ctypes.byref(ctypes.c_int(value)), ctypes.sizeof(ctypes.c_int)
-        )
-
-    def apply_window_shape(is_pill):
-        """Shape the frameless window: a GDI capsule region in Pill mode,
-        native DWM rounded corners in Full mode. Called after every resize."""
-        if not window or not window.native:
-            return
-        hwnd = window.native.Handle.ToInt32()
-        _dwm_set_attribute(hwnd, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE)
-        if is_pill:
-            w, h = int(window.width), int(window.height)
-            region = ctypes.windll.gdi32.CreateRoundRectRgn(0, 0, w + 1, h + 1, h, h)
-            if not ctypes.windll.user32.SetWindowRgn(hwnd, region, True):
-                ctypes.windll.gdi32.DeleteObject(region)
-        else:
-            ctypes.windll.user32.SetWindowRgn(hwnd, None, True)
-            _dwm_set_attribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)
-else:
-    def apply_window_shape(is_pill):
-        pass
-
-
-# ── UI bridge ──
-
-def push_js(js_code):
-    """Safely evaluate JS in the webview window."""
-    if window:
-        try:
-            window.evaluate_js(js_code)
-        except Exception:
-            pass  # Window may be closing
+def emit_event(obj):
+    """Write one JSON object as a line to the real stdout, flushed
+    immediately — piped stdout is block-buffered by default, not
+    line-buffered, so without an explicit flush the UI would see nothing
+    until an internal buffer filled up."""
+    _event_stream.write(json.dumps(obj) + "\n")
+    _event_stream.flush()
 
 
 def push_status(state, text):
-    """Push a state change to the frontend."""
-    safe_text = json.dumps(text)
-    push_js(f"updateStatus({json.dumps(state)}, {safe_text})")
+    emit_event({"type": "status", "state": state, "text": text})
 
 
 def push_transcript(text):
-    """Push transcript text to the frontend."""
-    push_js(f"updateTranscript({json.dumps(text)})")
+    emit_event({"type": "transcript", "text": text})
 
 
 def push_final_text(text):
-    """Push the final cleaned text to the frontend."""
-    push_js(f"updateFinalText({json.dumps(text)})")
+    emit_event({"type": "final_text", "text": text})
 
 
 def push_audio_level(rms):
-    """Push an audio RMS level to the frontend waveform."""
-    push_js(f"updateAudioLevel({rms:.4f})")
+    emit_event({"type": "audio_level", "rms": round(float(rms), 4)})
 
 
-class DictationAPI:
-    """Exposed to JavaScript via pywebview's js_api bridge."""
+# ── Commands (Electron -> Python, stdin) ──
 
-    def get_config(self):
-        """Return current config for the settings panel."""
-        whisper_cfg = config["whisper"]
-        backend_name = whisper_cfg.get("backend", "unknown")
-        model_size = whisper_cfg.get("model_size", "unknown")
+def get_config_dict():
+    """Current config, in the shape the Settings panel and the startup
+    'ready' event both need."""
+    whisper_cfg = config["whisper"]
+    backend_name = whisper_cfg.get("backend", "unknown")
+    model_size = whisper_cfg.get("model_size", "unknown")
 
-        if backend_name == "faster-whisper":
-            device = whisper_cfg.get("device", "cpu")
-            compute = whisper_cfg.get("compute_type", "")
-            backend_display = f"faster-whisper {model_size} {device} {compute}".strip()
-        elif backend_name == "mlx-whisper":
-            backend_display = f"mlx-whisper {model_size} Metal"
-        else:
-            backend_display = f"{backend_name} {model_size}"
+    if backend_name == "faster-whisper":
+        device = whisper_cfg.get("device", "cpu")
+        compute = whisper_cfg.get("compute_type", "")
+        backend_display = f"faster-whisper {model_size} {device} {compute}".strip()
+    elif backend_name == "mlx-whisper":
+        backend_display = f"mlx-whisper {model_size} Metal"
+    else:
+        backend_display = f"{backend_name} {model_size}"
 
-        plat = "darwin" if platform.system() == "Darwin" else "windows"
-        hotkey_val = HOTKEY_NAME
+    return {
+        "type": "config",
+        "hotkey_raw": HOTKEY_NAME,
+        "whisper_backend": backend_display,
+        "cleanup_model": config["cleanup"].get("ollama_model", ""),
+        "autostart": config.get("autostart", False),
+        "theme": config.get("theme", "dark"),
+        "opacity": config.get("opacity", "glass"),
+    }
 
-        return {
-            "hotkey": HOTKEY_DISPLAY,
-            "hotkey_raw": hotkey_val,
-            "whisper_backend": backend_display,
-            "cleanup_model": config["cleanup"].get("ollama_model", ""),
-            "autostart": config.get("autostart", False),
-            "theme": config.get("theme", "dark"),
-            "opacity": config.get("opacity", "glass"),
-        }
 
-    def set_window_size(self, width, height, pill=False):
-        """Dynamically resize window for Pill mode / Full mode, then
-        reapply the window's OS-level shape (see apply_window_shape)."""
-        if window:
-            try:
-                window.resize(int(width), int(height))
-                apply_window_shape(bool(pill))
-                return True
-            except Exception as e:
-                print(f"[window] resize failed: {e}", file=sys.stderr)
-        return False
-
-    def move_window_by(self, dx, dy):
-        """Move the window by a relative screen offset. Drives the custom
-        drag handling in app.js — -webkit-app-region: drag isn't reliably
-        honoured by pywebview's Windows/WebView2 backend, and easy_drag is
-        deliberately off so drag-anywhere doesn't fight text selection in
-        the editable transcript."""
-        if window:
-            try:
-                window.move(window.x + int(dx), window.y + int(dy))
-                return True
-            except Exception as e:
-                print(f"[window] move failed: {e}", file=sys.stderr)
-        return False
-
-    def close_window(self):
-        """Close the pywebview window (since OS close button is hidden)."""
-        if window:
-            window.destroy()
-        return True
-
-    def send_text(self, text):
-        """Paste the (possibly edited) text into the focused app."""
-        if not text or not text.strip():
-            push_status("idle", IDLE_STATUS)
-            return False
-        push_status("pasting", "Pasting...")
-        try:
-            inject(text.strip())
-            print(f"[inject] sent: {text.strip()!r}")
-            threading.Timer(1.0, lambda: push_status("idle", IDLE_STATUS)).start()
-            return True
-        except Exception as exc:
-            print(f"[inject] failed: {exc}", file=sys.stderr)
-            push_status("error", f"Paste failed: {exc}")
-            return False
-
-    def dismiss(self):
-        """Dismiss the current transcript without pasting."""
+def cmd_send_text(text):
+    """Paste the (possibly edited) text into the focused app."""
+    if not text or not text.strip():
         push_status("idle", IDLE_STATUS)
-        push_js("clearEditor()")
-        return True
+        return
+    push_status("pasting", "Pasting...")
+    try:
+        inject(text.strip())
+        print(f"[inject] sent: {text.strip()!r}")
+        threading.Timer(1.0, lambda: push_status("idle", IDLE_STATUS)).start()
+    except Exception as exc:
+        print(f"[inject] failed: {exc}", file=sys.stderr)
+        push_status("error", f"Paste failed: {exc}")
 
-    def save_config(self, data):
-        """Save editable settings to config.json."""
-        config_path = Path(__file__).parent / "config.json"
+
+def cmd_dismiss():
+    """Dismiss the current transcript without pasting."""
+    push_status("idle", IDLE_STATUS)
+    emit_event({"type": "clear_editor"})
+
+
+def cmd_save_config(data):
+    """Save editable settings to config.json."""
+    config_path = Path(__file__).parent / "config.json"
+    try:
+        with open(config_path, "r") as f:
+            raw = json.load(f)
+    except Exception:
+        raw = {}
+
+    if "hotkey" in data and data["hotkey"]:
+        plat = "darwin" if platform.system() == "Darwin" else "windows"
+        if "hotkey" not in raw or not isinstance(raw["hotkey"], dict):
+            raw["hotkey"] = {}
+        raw["hotkey"][plat] = data["hotkey"]
+
+    if "theme" in data:
+        raw["theme"] = data["theme"]
+        config["theme"] = data["theme"]
+
+    if "opacity" in data:
+        raw["opacity"] = data["opacity"]
+        config["opacity"] = data["opacity"]
+
+    if "autostart" in data:
+        raw["autostart"] = data["autostart"]
+        config["autostart"] = data["autostart"]
+
+    with open(config_path, "w") as f:
+        json.dump(raw, f, indent=2)
+
+
+def handle_command(cmd):
+    action = cmd.get("cmd")
+    if action == "send_text":
+        cmd_send_text(cmd.get("text", ""))
+    elif action == "dismiss":
+        cmd_dismiss()
+    elif action == "get_config":
+        emit_event(get_config_dict())
+    elif action == "save_config":
+        cmd_save_config(cmd.get("data", {}))
+    else:
+        print(f"[stdin] unknown command: {action!r}", file=sys.stderr)
+
+
+def stdin_reader_loop():
+    """Blocks on the main thread reading one JSON command per line until
+    stdin closes (Electron's child process pipe closing on app quit),
+    at which point this returns and main() exits cleanly."""
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
         try:
-            with open(config_path, "r") as f:
-                raw = json.load(f)
-        except Exception:
-            raw = {}
-
-        # Update editable fields
-        if "hotkey" in data and data["hotkey"]:
-            plat = "darwin" if platform.system() == "Darwin" else "windows"
-            if "hotkey" not in raw or not isinstance(raw["hotkey"], dict):
-                raw["hotkey"] = {}
-            raw["hotkey"][plat] = data["hotkey"]
-
-        if "theme" in data:
-            raw["theme"] = data["theme"]
-            config["theme"] = data["theme"]
-
-        if "opacity" in data:
-            raw["opacity"] = data["opacity"]
-            config["opacity"] = data["opacity"]
-
-        if "autostart" in data:
-            raw["autostart"] = data["autostart"]
-            config["autostart"] = data["autostart"]
-
-        with open(config_path, "w") as f:
-            json.dump(raw, f, indent=2)
-
-        return True
+            cmd = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"[stdin] malformed JSON, skipping: {exc}", file=sys.stderr)
+            continue
+        try:
+            handle_command(cmd)
+        except Exception as exc:
+            print(f"[stdin] command {cmd.get('cmd')!r} failed: {exc}", file=sys.stderr)
 
 
 # ── Audio ──
@@ -277,7 +224,6 @@ def audio_callback(indata, frame_count, time_info, status):
     with state_lock:
         if recording:
             frames.append(indata.copy())
-            # Compute RMS for the waveform
             rms = float(np.sqrt(np.mean(indata ** 2)))
             push_audio_level(rms)
 
@@ -424,21 +370,6 @@ def run_hotkey_listener():
     return listener
 
 
-# ── Window lifecycle ──
-
-def on_window_loaded():
-    """Called once the webview window has loaded the HTML."""
-    # Set the hotkey display
-    push_js(f"setHotkeyDisplay({json.dumps(HOTKEY_NAME)}, {json.dumps(HOTKEY_DISPLAY)})")
-    push_status("idle", IDLE_STATUS)
-    apply_window_shape(is_pill=False)
-
-
-def on_window_closing():
-    """Called when the window is about to close."""
-    os._exit(0)
-
-
 def check_macos_accessibility():
     """Preflight-check Accessibility/Input Monitoring access on macOS before
     starting the hotkey listener. Without this permission, pynput silently
@@ -467,8 +398,6 @@ def check_macos_accessibility():
 
 
 def main():
-    global window
-
     try:
         sd.check_input_settings(samplerate=SAMPLE_RATE, channels=1)
     except Exception as exc:
@@ -504,25 +433,12 @@ def main():
 
     run_hotkey_listener()
 
-    api = DictationAPI()
-    window = webview.create_window(
-        "Push 2 Talk",
-        url=str(UI_DIR / "index.html"),
-        js_api=api,
-        width=400,
-        height=360,
-        min_size=(200, 44),
-        frameless=True,
-        transparent=not IS_WINDOWS,
-        vibrancy=not IS_WINDOWS,
-        background_color="#111827",
-        easy_drag=False,
-    )
+    emit_event({"type": "ready", "hotkey_raw": HOTKEY_NAME, "hotkey_display": HOTKEY_DISPLAY})
+    push_status("idle", IDLE_STATUS)
+    print("[main] ready, listening for commands on stdin")
 
-    window.events.loaded += on_window_loaded
-    window.events.closing += on_window_closing
-
-    webview.start()
+    stdin_reader_loop()
+    print("[main] stdin closed, exiting")
 
 
 if __name__ == "__main__":

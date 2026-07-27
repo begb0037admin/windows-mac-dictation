@@ -1,6 +1,7 @@
-/* app.js — Frontend logic for windows-dictation pywebview UI.
-   Receives state updates from Python via global functions,
-   manages the waveform visualisation, handles editing/sending transcripts,
+/* app.js — Frontend logic for the Push 2 Talk UI (Electron shell, talks to
+   main.py over the backend-event/backend-command IPC wired in preload.js;
+   also keeps a pywebview.api fallback for the older non-Electron build).
+   Manages the waveform visualisation, handles editing/sending transcripts,
    supports Mini Pill Mode, and bridges settings (hotkey, theme, opacity, cleanup model, autostart). */
 
 'use strict';
@@ -194,7 +195,9 @@ async function sendText() {
   const text = dom.captionText.innerText || dom.captionText.textContent || '';
   if (!text.trim() || text.includes('Waiting for speech...')) return;
 
-  if (window.pywebview && window.pywebview.api) {
+  if (window.electronAPI) {
+    window.electronAPI.sendCommand({ cmd: 'send_text', text: text.trim() });
+  } else if (window.pywebview && window.pywebview.api) {
     try {
       await pywebview.api.send_text(text.trim());
     } catch (e) {
@@ -210,7 +213,9 @@ async function sendText() {
 }
 
 async function dismissText() {
-  if (window.pywebview && window.pywebview.api) {
+  if (window.electronAPI) {
+    window.electronAPI.sendCommand({ cmd: 'dismiss' });
+  } else if (window.pywebview && window.pywebview.api) {
     try {
       await pywebview.api.dismiss();
     } catch (e) {
@@ -369,6 +374,28 @@ function applyOpacity(opacityMode) {
 
 // ── Settings ──
 
+/**
+ * Populate the Settings fields from a config object — shared by the
+ * pywebview get_config() response and the Electron 'config' backend event.
+ */
+function applyConfig(config) {
+  if (!config) return;
+  if (config.hotkey_raw && dom.settingHotkey) {
+    dom.settingHotkey.value = config.hotkey_raw;
+  }
+  if (dom.settingBackend) dom.settingBackend.value = config.whisper_backend || '';
+  if (dom.settingCleanupModel) dom.settingCleanupModel.value = config.cleanup_model || '';
+
+  const autostart = config.autostart || false;
+  if (dom.settingAutostart) {
+    dom.settingAutostart.classList.toggle('on', autostart);
+    dom.settingAutostart.setAttribute('aria-pressed', String(autostart));
+  }
+
+  if (config.theme) applyTheme(config.theme === 'light');
+  if (config.opacity) applyOpacity(config.opacity);
+}
+
 async function loadSettings() {
   const savedTheme = localStorage.getItem('dictation_theme');
   if (savedTheme) applyTheme(savedTheme === 'light');
@@ -376,40 +403,38 @@ async function loadSettings() {
   const savedOpacity = localStorage.getItem('dictation_opacity');
   if (savedOpacity) applyOpacity(savedOpacity);
 
+  if (window.electronAPI) {
+    window.electronAPI.sendCommand({ cmd: 'get_config' });
+    return;
+  }
+
   if (!window.pywebview || !window.pywebview.api) return;
   try {
     const config = await pywebview.api.get_config();
-    if (config) {
-      if (config.hotkey_raw && dom.settingHotkey) {
-        dom.settingHotkey.value = config.hotkey_raw;
-      }
-      if (dom.settingBackend) dom.settingBackend.value = config.whisper_backend || '';
-      if (dom.settingCleanupModel) dom.settingCleanupModel.value = config.cleanup_model || '';
-
-      const autostart = config.autostart || false;
-      if (dom.settingAutostart) {
-        dom.settingAutostart.classList.toggle('on', autostart);
-        dom.settingAutostart.setAttribute('aria-pressed', String(autostart));
-      }
-
-      if (config.theme) applyTheme(config.theme === 'light');
-      if (config.opacity) applyOpacity(config.opacity);
-    }
+    applyConfig(config);
   } catch (e) {
     console.error('Failed to load settings:', e);
   }
 }
 
 async function saveSettings() {
+  const isLight = dom.settingTheme ? dom.settingTheme.classList.contains('on') : false;
+  const data = {
+    hotkey: dom.settingHotkey ? dom.settingHotkey.value : undefined,
+    theme: isLight ? 'light' : 'dark',
+    opacity: dom.settingOpacity ? dom.settingOpacity.value : 'glass',
+    autostart: dom.settingAutostart ? dom.settingAutostart.classList.contains('on') : false,
+  };
+
+  if (window.electronAPI) {
+    window.electronAPI.sendCommand({ cmd: 'save_config', data });
+    showFlash('Settings saved');
+    return;
+  }
+
   if (!window.pywebview || !window.pywebview.api) return;
   try {
-    const isLight = dom.settingTheme ? dom.settingTheme.classList.contains('on') : false;
-    await pywebview.api.save_config({
-      hotkey: dom.settingHotkey ? dom.settingHotkey.value : undefined,
-      theme: isLight ? 'light' : 'dark',
-      opacity: dom.settingOpacity ? dom.settingOpacity.value : 'glass',
-      autostart: dom.settingAutostart ? dom.settingAutostart.classList.contains('on') : false,
-    });
+    await pywebview.api.save_config(data);
     showFlash('Settings saved');
   } catch (e) {
     console.error('Failed to save settings:', e);
@@ -420,12 +445,51 @@ function setHotkeyDisplay(name, display) {
   if (dom.hotkeyKey) dom.hotkeyKey.textContent = display;
 }
 
+// ── Backend events (Electron only) ──
+//
+// main.py writes one JSON object per line to its stdout; electron/main.js
+// forwards each as a 'backend-event' IPC message, delivered here via
+// preload.js's onBackendEvent. See main.py's module docstring for the
+// full event/command shapes.
+
+function handleBackendEvent(event) {
+  switch (event.type) {
+    case 'status':
+      updateStatus(event.state, event.text);
+      break;
+    case 'transcript':
+      updateTranscript(event.text);
+      break;
+    case 'final_text':
+      updateFinalText(event.text);
+      break;
+    case 'audio_level':
+      updateAudioLevel(event.rms);
+      break;
+    case 'clear_editor':
+      clearEditor();
+      break;
+    case 'ready':
+      setHotkeyDisplay(event.hotkey_raw, event.hotkey_display);
+      break;
+    case 'config':
+      applyConfig(event);
+      break;
+    default:
+      console.warn('[backend] unknown event type:', event.type);
+  }
+}
+
 // ── Initialisation ──
 
 function init() {
   cacheDom();
   initWaveform();
   initDrag();
+
+  if (window.electronAPI && window.electronAPI.onBackendEvent) {
+    window.electronAPI.onBackendEvent(handleBackendEvent);
+  }
 
   // Restore saved appearance early
   const savedTheme = localStorage.getItem('dictation_theme');
@@ -453,7 +517,9 @@ function init() {
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
-    if (window.pywebview && window.pywebview.api) {
+    if (window.electronAPI) {
+      window.electronAPI.closeWindow();
+    } else if (window.pywebview && window.pywebview.api) {
       await pywebview.api.close_window();
     } else {
       console.log('Close window');
@@ -510,9 +576,13 @@ function init() {
   updateStatus('idle', 'Initialising...');
   updateTranscript('');
 
-  // Standalone preview fallback
+  // Standalone preview fallback — only when neither a real Electron backend
+  // nor a pywebview bridge is present (e.g. index.html opened directly in a
+  // plain browser tab for quick CSS iteration).
   setTimeout(() => {
-    if (!window.pywebview || !window.pywebview.api) {
+    const hasElectronBackend = !!window.electronAPI;
+    const hasPywebviewBackend = !!(window.pywebview && window.pywebview.api);
+    if (!hasElectronBackend && !hasPywebviewBackend) {
       runDemoMode();
     }
   }, 500);
