@@ -57,7 +57,7 @@ function initWaveform() {
   if (container) {
     container.innerHTML = '';
     waveformBars = [];
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < 54; i++) {
       const bar = document.createElement('span');
       bar.className = 'wave-bar';
       bar.style.setProperty('--i', i);
@@ -71,7 +71,7 @@ function initWaveform() {
   if (pillContainer) {
     pillContainer.innerHTML = '';
     pillBars = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 24; i++) {
       const bar = document.createElement('span');
       bar.className = 'wave-bar';
       bar.style.setProperty('--i', i);
@@ -82,25 +82,44 @@ function initWaveform() {
   }
 }
 
+// "Aurora" color treatment (approved from the waveform mockup): a
+// teal -> violet -> magenta hue sweep across the bar array that also
+// drifts slowly over time, brightening with how loud that instant is.
+function auroraColor(index, count, level) {
+  const hue = (175 + (index / count) * 130 + (Date.now() / 55) % 40) % 360;
+  const light = 56 + level * 14;
+  return `hsl(${hue}, 88%, ${light}%)`;
+}
+
+function paintBar(bar, level, maxHeight, minHeight, index, count) {
+  const height = Math.max(minHeight, level * maxHeight);
+  bar.style.height = `${height}px`;
+  bar.style.opacity = Math.max(0.4, 0.4 + level * 0.6);
+  const color = auroraColor(index, count, level);
+  bar.style.background = color;
+  bar.style.boxShadow = `0 0 ${5 + level * 12}px ${color.replace('hsl', 'hsla').replace(')', ',0.55)')}`;
+}
+
 /**
  * Called from Python with an RMS audio level (0.0–1.0).
  */
 function updateAudioLevel(rms) {
+  // Raw mic RMS for normal speaking volume is small (roughly 0.02-0.1) --
+  // a flat rms*3 scale left the waveform barely moving for anything short
+  // of shouting. This compressive curve (boost, then a <1 power) makes
+  // normal speech read as clearly visible motion while still leaving
+  // headroom for genuinely loud input to look proportionally bigger.
+  const boosted = Math.pow(Math.min(1, rms * 6), 0.65);
   audioLevels.shift();
-  audioLevels.push(Math.min(1.0, rms * 3.0));
+  audioLevels.push(boosted);
 
   for (let i = 0; i < waveformBars.length; i++) {
-    const level = audioLevels[i];
-    const height = Math.max(4, level * 52);
-    waveformBars[i].style.height = `${height}px`;
-    waveformBars[i].style.opacity = Math.max(0.3, 0.3 + level * 0.6);
+    paintBar(waveformBars[i], audioLevels[i], 58, 4, i, waveformBars.length);
   }
 
   for (let i = 0; i < pillBars.length; i++) {
     const level = audioLevels[i * 2] || 0;
-    const height = Math.max(3, level * 16);
-    pillBars[i].style.height = `${height}px`;
-    pillBars[i].style.opacity = Math.max(0.3, 0.3 + level * 0.6);
+    paintBar(pillBars[i], level, 20, 3, i, pillBars.length);
   }
 }
 
@@ -109,10 +128,14 @@ function resetWaveform() {
   for (const bar of waveformBars) {
     bar.style.height = '8px';
     bar.style.opacity = '';
+    bar.style.background = '';
+    bar.style.boxShadow = '';
   }
   for (const bar of pillBars) {
     bar.style.height = '6px';
     bar.style.opacity = '';
+    bar.style.background = '';
+    bar.style.boxShadow = '';
   }
 }
 
