@@ -118,13 +118,20 @@
             <div class="field-row">
               <label for="settingHotkey">Hotkey (hold to record)</label>
               <select class="field" id="settingHotkey">
-                <option value="alt_l">Left Option / Alt</option>
-                <option value="alt_r">Right Option / Alt</option>
-                <option value="ctrl_r">Right Control</option>
-                <option value="ctrl_l">Left Control</option>
-                <option value="cmd_r">Right Command</option>
+                <optgroup label="Keyboard">
+                  <option value="alt_l">Left Option / Alt</option>
+                  <option value="alt_r">Right Option / Alt</option>
+                  <option value="ctrl_r">Right Control</option>
+                  <option value="ctrl_l">Left Control</option>
+                  <option value="cmd_r">Right Command</option>
+                </optgroup>
+                <optgroup label="Mouse (not side-effect-free - see hint)">
+                  <option value="mouse_middle">Middle Mouse Button</option>
+                  <option value="mouse_x1">Mouse Button 4 (side)</option>
+                  <option value="mouse_x2">Mouse Button 5 (side)</option>
+                </optgroup>
               </select>
-              <span class="hint">Restart required after changing</span>
+              <span class="hint">Restart required after changing. Mouse buttons still do their normal thing (e.g. autoscroll) in addition to dictation.</span>
             </div>
             <div class="field-row">
               <label for="settingBackend">Whisper backend</label>

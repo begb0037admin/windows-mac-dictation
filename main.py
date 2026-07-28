@@ -14,6 +14,12 @@ Hold the hotkey (Right Ctrl on Windows, Right Option on Mac by default),
 speak, release — the cleaned-up transcript is pasted automatically the
 moment it's ready, wherever the cursor was when dictation started. No
 review/confirm step: there is no window to click into or button to press.
+The configured hotkey can also be a mouse button (config.json's "hotkey"
+value: "mouse_left"/"mouse_right"/"mouse_middle"/"mouse_x1"/"mouse_x2") -
+unlike the keyboard defaults, a mouse-button hotkey is not side-effect-free:
+pynput listens passively and does not suppress the button's normal OS
+behavior (e.g. middle-click still autoscrolls/opens-in-new-tab wherever the
+cursor is, in addition to triggering dictation).
 
 macOS note: the hotkey listener AND the paste injection need Accessibility
 permission granted to whatever runs this script (Terminal, or your Python
@@ -33,7 +39,7 @@ from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
-from pynput import keyboard
+from pynput import keyboard, mouse
 
 from cleanup import cleanup
 from config import CONFIG_PATH, load_config
@@ -67,7 +73,24 @@ SAMPLE_RATE = config["sample_rate"]
 HOTKEY_NAME = config["hotkey"]
 
 
+# A hotkey name prefixed "mouse_" resolves to a pynput.mouse.Button instead
+# of a keyboard key - x1/x2 (extra side buttons) only exist on some
+# platforms/mice, so they're looked up defensively rather than assumed.
+MOUSE_BUTTON_NAMES = {
+    "mouse_left": getattr(mouse.Button, "left", None),
+    "mouse_right": getattr(mouse.Button, "right", None),
+    "mouse_middle": getattr(mouse.Button, "middle", None),
+    "mouse_x1": getattr(mouse.Button, "x1", None),
+    "mouse_x2": getattr(mouse.Button, "x2", None),
+}
+
+
 def resolve_hotkey(name):
+    if name in MOUSE_BUTTON_NAMES:
+        button = MOUSE_BUTTON_NAMES[name]
+        if button is None:
+            raise ValueError(f"Mouse button '{name}' is not available on this platform/device")
+        return button
     key = getattr(keyboard.Key, name, None)
     if key is not None:
         return key
@@ -75,14 +98,26 @@ def resolve_hotkey(name):
         return keyboard.KeyCode.from_char(name)
     raise ValueError(
         f"Unrecognised hotkey '{name}' — use a pynput Key name "
-        f"(e.g. 'ctrl_r', 'alt_r', 'cmd_r') or a single character"
+        f"(e.g. 'ctrl_r', 'alt_r', 'cmd_r'), a single character, "
+        f"or a mouse button ({', '.join(sorted(MOUSE_BUTTON_NAMES))})"
     )
 
 
 HOTKEY = resolve_hotkey(HOTKEY_NAME)
-HOTKEY_DISPLAY = HOTKEY_NAME.replace("_r", " (right)").replace("_l", " (left)").replace("_", " ").title()
-if platform.system() == "Darwin":
-    HOTKEY_DISPLAY = HOTKEY_DISPLAY.replace("Alt", "Option")
+HOTKEY_IS_MOUSE = isinstance(HOTKEY, mouse.Button)
+
+if HOTKEY_IS_MOUSE:
+    HOTKEY_DISPLAY = {
+        "mouse_left": "Left Mouse Button",
+        "mouse_right": "Right Mouse Button",
+        "mouse_middle": "Middle Mouse Button",
+        "mouse_x1": "Mouse Button 4",
+        "mouse_x2": "Mouse Button 5",
+    }[HOTKEY_NAME]
+else:
+    HOTKEY_DISPLAY = HOTKEY_NAME.replace("_r", " (right)").replace("_l", " (left)").replace("_", " ").title()
+    if platform.system() == "Darwin":
+        HOTKEY_DISPLAY = HOTKEY_DISPLAY.replace("Alt", "Option")
 IDLE_STATUS = f"Hold {HOTKEY_DISPLAY} to record"
 
 state_lock = threading.Lock()
@@ -461,8 +496,26 @@ def on_release(key):
         threading.Thread(target=stop_recording, daemon=True).start()
 
 
+def on_click(x, y, button, pressed):
+    if button != HOTKEY:
+        return
+    if pressed:
+        start_recording()
+    else:
+        threading.Thread(target=stop_recording, daemon=True).start()
+
+
 def run_hotkey_listener():
-    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    # pynput listens passively - it does not suppress the original OS
+    # action, unlike the keyboard case where the default hotkeys are
+    # deliberately chosen lone modifier keys with no side effects of their
+    # own. A mouse-button hotkey (e.g. middle-click) still triggers
+    # whatever that button normally does wherever the cursor is
+    # (autoscroll, open-link-in-new-tab, etc) in addition to dictation.
+    if HOTKEY_IS_MOUSE:
+        listener = mouse.Listener(on_click=on_click)
+    else:
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
     return listener
 
