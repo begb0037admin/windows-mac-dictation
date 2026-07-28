@@ -17,4 +17,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onBackendEvent: (callback) => {
     ipcRenderer.on('backend-event', (_event, data) => callback(data));
   },
+  // SS14: fatal/warning errors main.js can't route through the regular
+  // backend-event channel (e.g. before the backend even spawns, or a
+  // login-item failure that never touches Python at all).
+  onAppError: (callback) => {
+    ipcRenderer.on('app-error', (_event, data) => callback(data));
+  },
 });

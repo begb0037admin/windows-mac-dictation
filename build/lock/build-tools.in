@@ -1,0 +1,7 @@
+# Build-tooling requirements, locked separately from the app's own runtime
+# dependencies (win-x64.in / mac-arm64.in). pip-compile --generate-hashes
+# against this file produces build-tools.win-<arch>.txt, installed into the
+# same per-run venv as the runtime lock (build-app.ps1 step 9).
+pyinstaller
+pip-tools
+pytest

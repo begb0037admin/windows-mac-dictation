@@ -2,12 +2,14 @@
   "name": "dictation-shell",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron shell spike for the windows-mac-dictation Mini Float UI (Phase 1: shape/border/drag proof, no Python IPC yet).",
+  "description": "Push 2 Talk - push-to-talk voice dictation. Electron shell, spawns the Python backend (dev: system Python; packaged: frozen PyInstaller executable).",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test tests/test_diagnostics.mjs tests/test_login_item.mjs tests/test_fatal_lifecycle.mjs"
   },
   "devDependencies": {
-    "electron": "43.2.0"
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3"
   }
 }

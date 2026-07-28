@@ -1,0 +1,1 @@
+package @ https://example.com/package.whl

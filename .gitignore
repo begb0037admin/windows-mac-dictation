@@ -1,7 +1,12 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 
 electron/node_modules/
+
+# per-run packaging output (build/build-app.ps1) - never committed, see
+# FINAL_BRIEF.md SS3: "<run-id>" is regenerated every run
+build/out/
 
 # personal convenience scripts, delivered via SendUserFile, not part of the app
 rundictation.bat

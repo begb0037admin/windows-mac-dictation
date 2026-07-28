@@ -36,7 +36,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from cleanup import cleanup
-from config import load_config
+from config import CONFIG_PATH, load_config
 from inject import inject
 from transcribe import transcribe
 
@@ -225,10 +225,12 @@ def paste_text(text):
 
 
 def cmd_save_config(data):
-    """Save editable settings to config.json."""
-    config_path = Path(__file__).parent / "config.json"
+    """Save editable settings to config.json. Uses config.py's CONFIG_PATH
+    (the single source of truth - see config.resolve_config_path()) rather
+    than re-deriving its own copy, so dev mode and a packaged app's
+    userData-relative location never disagree."""
     try:
-        with open(config_path, "r") as f:
+        with open(CONFIG_PATH, "r") as f:
             raw = json.load(f)
     except Exception:
         raw = {}
@@ -251,7 +253,7 @@ def cmd_save_config(data):
         raw["autostart"] = data["autostart"]
         config["autostart"] = data["autostart"]
 
-    with open(config_path, "w") as f:
+    with open(CONFIG_PATH, "w") as f:
         json.dump(raw, f, indent=2)
 
 

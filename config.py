@@ -1,8 +1,25 @@
 import json
+import os
 import platform
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+
+def resolve_config_path() -> Path:
+    """Dev mode (env var unset) keeps the historical script-relative path
+    unchanged. A packaged app sets PUSH2TALK_CONFIG_PATH to a writable
+    user-data location (electron/main.js: app.getPath('userData')) so
+    settings never need to be written inside the install tree, which is
+    typically not user-writable and would also defeat uninstall's
+    "preserve userData" requirement. This is the single source of truth
+    for the config path - main.py's cmd_save_config() imports it rather
+    than re-deriving its own copy."""
+    override = os.environ.get("PUSH2TALK_CONFIG_PATH")
+    if override:
+        return Path(override)
+    return Path(__file__).parent / "config.json"
+
+
+CONFIG_PATH = resolve_config_path()
 
 CURRENT_PLATFORM = "windows" if platform.system() == "Windows" else "darwin" if platform.system() == "Darwin" else "linux"
 
@@ -62,6 +79,7 @@ def load_config():
     hotkey/whisper sections down to the values for the OS this is running on.
     """
     if not CONFIG_PATH.exists():
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps(DEFAULTS, indent=2))
         raw = dict(DEFAULTS)
     else:
