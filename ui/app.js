@@ -53,6 +53,7 @@ function cacheDom() {
     settingBackend: document.getElementById('settingBackend'),
     settingCleanupModel: document.getElementById('settingCleanupModel'),
     settingAutostart: document.getElementById('settingAutostart'),
+    settingAlwaysOnTop: document.getElementById('settingAlwaysOnTop'),
     // App error panel (SS14)
     appError: document.getElementById('appError'),
     appErrorCode: document.getElementById('appErrorCode'),
@@ -401,6 +402,12 @@ function applyConfig(config) {
     dom.settingAutostart.setAttribute('aria-pressed', String(autostart));
   }
 
+  const alwaysOnTop = config.alwaysOnTop !== false; // default true, matches config.py
+  if (dom.settingAlwaysOnTop) {
+    dom.settingAlwaysOnTop.classList.toggle('on', alwaysOnTop);
+    dom.settingAlwaysOnTop.setAttribute('aria-pressed', String(alwaysOnTop));
+  }
+
   if (config.theme) applyTheme(config.theme === 'light');
   if (config.opacity) applyOpacity(config.opacity);
 }
@@ -433,6 +440,7 @@ async function saveSettings() {
     theme: isLight ? 'light' : 'dark',
     opacity: dom.settingOpacity ? dom.settingOpacity.value : 'glass',
     autostart: dom.settingAutostart ? dom.settingAutostart.classList.contains('on') : false,
+    alwaysOnTop: dom.settingAlwaysOnTop ? dom.settingAlwaysOnTop.classList.contains('on') : true,
   };
 
   if (window.electronAPI) {
@@ -563,6 +571,15 @@ function init() {
       const isOn = !dom.settingAutostart.classList.contains('on');
       dom.settingAutostart.classList.toggle('on', isOn);
       dom.settingAutostart.setAttribute('aria-pressed', String(isOn));
+      saveSettings();
+    });
+  }
+
+  if (dom.settingAlwaysOnTop) {
+    dom.settingAlwaysOnTop.addEventListener('click', () => {
+      const isOn = !dom.settingAlwaysOnTop.classList.contains('on');
+      dom.settingAlwaysOnTop.classList.toggle('on', isOn);
+      dom.settingAlwaysOnTop.setAttribute('aria-pressed', String(isOn));
       saveSettings();
     });
   }

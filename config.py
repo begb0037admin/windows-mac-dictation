@@ -68,6 +68,7 @@ DEFAULTS = {
     "autostart": False,
     "theme": "dark",
     "opacity": "glass",
+    "alwaysOnTop": True,
 }
 
 
@@ -125,4 +126,5 @@ def load_config():
         "autostart": merged["autostart"],
         "theme": merged["theme"],
         "opacity": merged["opacity"],
+        "alwaysOnTop": merged["alwaysOnTop"],
     }

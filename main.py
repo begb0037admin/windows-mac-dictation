@@ -249,6 +249,7 @@ def get_config_dict():
         "autostart": config.get("autostart", False),
         "theme": config.get("theme", "dark"),
         "opacity": config.get("opacity", "glass"),
+        "alwaysOnTop": config.get("alwaysOnTop", True),
     }
 
 
@@ -300,6 +301,10 @@ def cmd_save_config(data):
     if "autostart" in data:
         raw["autostart"] = data["autostart"]
         config["autostart"] = data["autostart"]
+
+    if "alwaysOnTop" in data:
+        raw["alwaysOnTop"] = data["alwaysOnTop"]
+        config["alwaysOnTop"] = data["alwaysOnTop"]
 
     with open(CONFIG_PATH, "w") as f:
         json.dump(raw, f, indent=2)

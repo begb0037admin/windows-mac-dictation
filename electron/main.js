@@ -246,6 +246,14 @@ function handleAutostartToggle(requested) {
 function reconcileConfigOnStartup(configEvent) {
   const result = reconcileLoginItemOnStartup(loginItemCtx(), configEvent, lastKnownAutostart);
   lastKnownAutostart = result.lastKnownAutostart;
+  // alwaysOnTop needs no OS-level readback dance like autostart does -
+  // setAlwaysOnTop() is a synchronous, reliable Electron window property,
+  // not an OS API call that can silently fail. The window is constructed
+  // with alwaysOnTop:true by default; apply the user's stored preference
+  // (which may be false) once it's known.
+  if (mainWindow && !mainWindow.isDestroyed() && typeof result.configEvent.alwaysOnTop === 'boolean') {
+    mainWindow.setAlwaysOnTop(result.configEvent.alwaysOnTop, 'floating');
+  }
   return result.configEvent;
 }
 
@@ -334,6 +342,13 @@ function spawnBackend(win) {
 }
 
 ipcMain.on('backend-command', (event, cmd) => {
+  if (cmd && cmd.cmd === 'save_config' && cmd.data && typeof cmd.data.alwaysOnTop === 'boolean') {
+    // Applied live as a side effect; still forwarded through to Python
+    // below (unlike autostart) since there's no readback value to
+    // substitute - the requested value is authoritative.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.setAlwaysOnTop(cmd.data.alwaysOnTop, 'floating');
+  }
   if (cmd && cmd.cmd === 'save_config' && cmd.data && Object.prototype.hasOwnProperty.call(cmd.data, 'autostart')) {
     // SS11.1: autostart is intercepted and applied via the OS API, then
     // forwarded to Python with the read-back actual value - never the
@@ -390,6 +405,10 @@ function createWindow() {
     hasShadow: false,
     resizable: false,
     show: false,
+    // Kevin: clicking any other window sent this one to the background,
+    // which defeats the point of a push-to-talk overlay you glance at
+    // mid-typing. Keep it above normal windows always.
+    alwaysOnTop: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -407,6 +426,12 @@ function createWindow() {
   // enough, but call it explicitly too in case that option doesn't fully
   // apply on this Electron/Windows combination.
   win.setHasShadow(false);
+
+  // Same belt-and-suspenders reasoning for alwaysOnTop - explicit call
+  // in addition to the constructor option. 'floating' keeps it above
+  // normal windows without needing 'screen-saver' level, which can behave
+  // oddly by grabbing focus over full-screen apps on some platforms.
+  win.setAlwaysOnTop(true, 'floating');
 
   win.once('ready-to-show', () => win.show());
 
