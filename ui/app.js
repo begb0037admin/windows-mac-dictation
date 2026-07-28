@@ -53,6 +53,12 @@ function cacheDom() {
     settingBackend: document.getElementById('settingBackend'),
     settingCleanupModel: document.getElementById('settingCleanupModel'),
     settingAutostart: document.getElementById('settingAutostart'),
+    // App error panel (SS14)
+    appError: document.getElementById('appError'),
+    appErrorCode: document.getElementById('appErrorCode'),
+    appErrorMessage: document.getElementById('appErrorMessage'),
+    appErrorDetail: document.getElementById('appErrorDetail'),
+    appErrorDismiss: document.getElementById('appErrorDismiss'),
   };
 }
 
@@ -203,6 +209,31 @@ function updateFinalText(text) {
     dom.captionText.textContent = text;
     dom.captionText.scrollTop = dom.captionText.scrollHeight;
   }
+}
+
+// ── App error panel (SS14) ──
+//
+// Fatal errors (severity: 'fatal') are non-dismissible and force Full view
+// - there's no point showing a fatal error behind the tiny pill. Warnings
+// (severity: 'warning', e.g. LOGIN_ITEM_FAILED) are dismissible and never
+// block dictation; they don't force a view change.
+
+function handleAppError(payload) {
+  if (!dom.appError || !payload) return;
+  const isFatal = payload.severity === 'fatal';
+  dom.appErrorCode.textContent = payload.code || '';
+  dom.appErrorMessage.textContent = payload.message || '';
+  dom.appErrorDetail.textContent = payload.detail ? JSON.stringify(payload.detail) : '';
+  dom.appError.classList.remove('severity-fatal', 'severity-warning');
+  dom.appError.classList.add(isFatal ? 'severity-fatal' : 'severity-warning');
+  dom.appError.classList.add('visible');
+  if (isFatal && isPillMode) disablePillMode();
+}
+
+function dismissAppError() {
+  if (!dom.appError) return;
+  if (dom.appError.classList.contains('severity-fatal')) return; // non-dismissible
+  dom.appError.classList.remove('visible');
 }
 
 // ── Pill / Mini Bar Mode ──
@@ -464,6 +495,12 @@ function init() {
 
   if (window.electronAPI && window.electronAPI.onBackendEvent) {
     window.electronAPI.onBackendEvent(handleBackendEvent);
+  }
+  if (window.electronAPI && window.electronAPI.onAppError) {
+    window.electronAPI.onAppError(handleAppError);
+  }
+  if (dom.appErrorDismiss) {
+    dom.appErrorDismiss.addEventListener('click', dismissAppError);
   }
 
   // Restore saved appearance early

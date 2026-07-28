@@ -1,0 +1,13 @@
+# Windows x64 runtime requirements for the frozen backend. Mirrors
+# requirements.txt's win32 branch, resolved to a single platform (a generated
+# lock is inherently platform-specific - see FINAL_BRIEF.md SS8). pip-compile
+# --generate-hashes against this file produces win-x64.txt.
+sounddevice
+numpy
+pynput
+pyperclip
+pyautogui
+faster-whisper
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+nvidia-cuda-nvrtc-cu12

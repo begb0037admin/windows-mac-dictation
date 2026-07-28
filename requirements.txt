@@ -5,3 +5,11 @@ pyperclip
 pyautogui
 faster-whisper; sys_platform == "win32"
 mlx-whisper; sys_platform == "darwin"
+# CUDA runtime libraries faster-whisper's ctranslate2 backend actually loads
+# at runtime on Windows (config.py DEFAULTS pins device="cuda"). Confirmed
+# installed and required on Kevin's machine (I1, 2026-07-28) but previously
+# missing from this file - a bare `pip install -r requirements.txt` on a
+# clean Windows machine would not have gotten CUDA transcription working.
+nvidia-cublas-cu12; sys_platform == "win32"
+nvidia-cudnn-cu12; sys_platform == "win32"
+nvidia-cuda-nvrtc-cu12; sys_platform == "win32"

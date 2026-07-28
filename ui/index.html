@@ -35,6 +35,16 @@
       </div>
     </header>
 
+    <!-- Fatal/warning error panel (SS14). Fatal errors are non-dismissible and
+         switch Mini Pill to Full view (app.js); warnings are dismissible and
+         do not block dictation. Hidden by default. -->
+    <div class="app-error-panel" id="appError" role="alert" aria-live="assertive">
+      <div class="app-error-code" id="appErrorCode"></div>
+      <div class="app-error-message" id="appErrorMessage"></div>
+      <div class="app-error-detail" id="appErrorDetail"></div>
+      <button class="app-error-dismiss" id="appErrorDismiss" type="button">Dismiss</button>
+    </div>
+
     <!-- Flash notification -->
     <div class="flash" id="flash"></div>
 

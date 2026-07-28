@@ -1,0 +1,12 @@
+# Mac arm64 runtime requirements for the frozen backend. Mirrors
+# requirements.txt's darwin branch, resolved to a single platform (a
+# generated lock is inherently platform-specific - see FINAL_BRIEF.md SS8).
+# UNVERIFIED (Decision 7, authored 2026-07-28 without Apple Silicon hardware
+# available) - do not generate mac-arm64.txt from this file until run on
+# real Apple Silicon; see build/build-app.sh step 4.
+sounddevice
+numpy
+pynput
+pyperclip
+pyautogui
+mlx-whisper
