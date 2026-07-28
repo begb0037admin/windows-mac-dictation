@@ -77,6 +77,44 @@ function encodeSolidRgbaPng(size, [r, g, b, a]) {
   return Buffer.concat([PNG_SIGNATURE, ihdr, idat, iend]);
 }
 
+// General encoder: getPixel(x, y) returns [r, g, b, a] (straight alpha,
+// 0-255 each) for the pixel at that integer coordinate. Used by
+// build/rasterize-logo-icon.js to rasterize ui/logo.svg's exact shapes
+// (a fixed, non-general renderer - see that file) without a real PNG/SVG
+// library in the dependency tree.
+function encodeRgbaPng(width, height, getPixel) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new Error(`invalid PNG dimensions: ${width}x${height}`);
+  }
+  const ihdrData = Buffer.alloc(13);
+  ihdrData.writeUInt32BE(width, 0);
+  ihdrData.writeUInt32BE(height, 4);
+  ihdrData.writeUInt8(8, 8);
+  ihdrData.writeUInt8(6, 9);
+  ihdrData.writeUInt8(0, 10);
+  ihdrData.writeUInt8(0, 11);
+  ihdrData.writeUInt8(0, 12);
+  const ihdr = encodeChunk('IHDR', ihdrData);
+
+  const rowLength = 1 + width * 4;
+  const raw = Buffer.alloc(rowLength * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * rowLength;
+    raw[rowStart] = 0;
+    for (let x = 0; x < width; x++) {
+      const [r, g, b, a] = getPixel(x, y);
+      const px = rowStart + 1 + x * 4;
+      raw[px] = r;
+      raw[px + 1] = g;
+      raw[px + 2] = b;
+      raw[px + 3] = a;
+    }
+  }
+  const idat = encodeChunk('IDAT', zlib.deflateSync(raw));
+  const iend = encodeChunk('IEND', Buffer.alloc(0));
+  return Buffer.concat([PNG_SIGNATURE, ihdr, idat, iend]);
+}
+
 function readPngDimensions(buf) {
   if (buf.length < 33 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
   const chunkType = buf.subarray(12, 16).toString('ascii');
@@ -122,4 +160,4 @@ function decodeSolidRgbaPng(buf) {
   return { width, height, pixelAt };
 }
 
-module.exports = { crc32, encodeChunk, encodeSolidRgbaPng, readPngDimensions, decodeSolidRgbaPng, PNG_SIGNATURE };
+module.exports = { crc32, encodeChunk, encodeSolidRgbaPng, encodeRgbaPng, readPngDimensions, decodeSolidRgbaPng, PNG_SIGNATURE };

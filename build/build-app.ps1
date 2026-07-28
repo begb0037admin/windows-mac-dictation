@@ -127,7 +127,7 @@ $IconIco = Join-Path $ElectronDir 'build\icon.ico'
 $IconSourcePng = Join-Path $ElectronDir 'build\icon.png'
 if (-not (Test-Path $IconIco)) {
     if (-not (Test-Path $IconSourcePng)) {
-        Fail 6 "no icon.ico and no source icon.png at $IconSourcePng to generate one from - rasterize ui/logo.svg (or run build/write-placeholder-icon-png.js for a placeholder) first."
+        Fail 6 "no icon.ico and no source icon.png at $IconSourcePng to generate one from - run: node build\rasterize-logo-icon.js"
     }
     & node (Join-Path $RepoRoot 'build\generate-icon.js') --source $IconSourcePng --output $IconIco --format ico
     if ($LASTEXITCODE -ne 0) { Fail 6 'generate-icon.js failed to produce icon.ico' }
