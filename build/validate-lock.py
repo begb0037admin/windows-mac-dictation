@@ -30,7 +30,7 @@ REQUIREMENT_RE = re.compile(
     r"==(?P<version>[^\s;=<>!~]+)"
     r"(?:\s*;\s*(?P<marker>.+))?$"
 )
-HASH_RE = re.compile(r"^--hash=(?P<algo>[a-zA-Z0-9]+):(?P<digest>[0-9a-fA-F]+)$")
+HASH_RE = re.compile(r"^--hash=(?P<algo>[a-zA-Z0-9]+):(?P<digest>[0-9a-fA-F]{64})$")
 REJECTED_PIN_OPERATORS = (">=", "<=", "~=", "!=", ">", "<", "@")
 ALLOWED_HASH_ALGO = "sha256"
 
@@ -101,37 +101,41 @@ def _validate_requirement_line(line, path, start, end):
     if not tokens:
         return None
     head = tokens[0]
-    for op in REJECTED_PIN_OPERATORS:
-        if op in head and "==" not in head.split(op)[0] + op:
-            pass  # exact rejection handled by the regex failing to match below
     if head in ("-r", "--requirement", "-c", "--constraint") or tokens[0] in ("-e", "--editable"):
         raise LockError(path, start, end, f"disallowed requirement-file directive {head!r}")
 
+    hash_start = next((i for i, token in enumerate(tokens) if token.startswith("--hash=")), None)
+    if hash_start is None:
+        raise LockError(path, start, end, f"{head}: no --hash= tokens (unpinned by hash)")
+
+    # Preserve the complete requirement expression before the first hash -
+    # environment markers legitimately contain whitespace (e.g.
+    # `; python_version >= "3.11" and sys_platform == "win32"`) and so
+    # cannot be parsed by treating tokens[0] as the entire requirement.
+    requirement_text = " ".join(tokens[:hash_start])
     # A bare/unpinned/URL/local-path/editable/VCS requirement will simply fail
     # this regex - every rejected form in FINAL_BRIEF.md SS8.1's examples
     # (">=", bare name, "@ url", editable, VCS) lacks a literal "==<version>"
     # immediately after the name[extras], which the regex requires.
-    match = REQUIREMENT_RE.match(head)
+    match = REQUIREMENT_RE.fullmatch(requirement_text)
     if not match:
-        raise LockError(path, start, end, f"not a valid pinned requirement: {head!r}")
+        raise LockError(path, start, end, f"not a valid pinned requirement: {requirement_text!r}")
 
-    hash_tokens = tokens[1:]
-    if not hash_tokens:
-        raise LockError(path, start, end, f"{head}: no --hash= tokens (unpinned by hash)")
+    hash_tokens = tokens[hash_start:]
 
     digests = []
     for h in hash_tokens:
         hm = HASH_RE.match(h)
         if not hm:
-            raise LockError(path, start, end, f"{head}: unrecognized token {h!r} (expected --hash=<algo>:<hex>)")
+            raise LockError(path, start, end, f"{requirement_text}: unrecognized token {h!r} (expected --hash=<algo>:<64-hex>)")
         if hm.group("algo") != ALLOWED_HASH_ALGO:
             raise LockError(
                 path, start, end,
-                f"{head}: hash algorithm {hm.group('algo')!r} not in the allowlist ({ALLOWED_HASH_ALGO})",
+                f"{requirement_text}: hash algorithm {hm.group('algo')!r} not in the allowlist ({ALLOWED_HASH_ALGO})",
             )
         digest = hm.group("digest")
         if not digest:
-            raise LockError(path, start, end, f"{head}: empty hash digest")
+            raise LockError(path, start, end, f"{requirement_text}: empty hash digest")
         digests.append(digest)
 
     return {"name": match.group("name"), "version": match.group("version"), "hashes": digests}

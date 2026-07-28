@@ -56,6 +56,23 @@ function main() {
   if (!fs.existsSync(runRoot)) fatal(10, `run directory does not exist: ${runRoot} (build-app.ps1 must create it before calling this)`);
   const runRootReal = fs.realpathSync(runRoot);
 
+  // Turn 5 (Codex, applied by hand turn 6 after the patch itself failed to
+  // apply mechanically): --output must be exactly the active run's
+  // prescribed path, never an arbitrary caller-supplied location.
+  const prescribedOutput = path.join(runRootReal, 'generated', 'electron-builder.json');
+  if (path.resolve(args.output) !== prescribedOutput) {
+    fatal(2, `--output must be the active run's prescribed generated path: ${prescribedOutput}`);
+  }
+
+  // The checked-in hook is explicitly a pre-observation guess (SS16/SS18)
+  // and must not be usable until a bootstrap install has established the
+  // exact Run-key registration and the hook has been rewritten and
+  // validated against it - mechanically blocked rather than left to
+  // discipline.
+  if (args['include-uninstall-hook'] === 'true') {
+    fatal(16, 'uninstall hook is blocked until bootstrap installation observation and hook validation are recorded');
+  }
+
   const backendSource = path.join(runRootReal, 'backend', 'push2talk-backend');
   const outputDir = path.join(runRootReal, 'electron');
   const uiSource = path.join(repoRoot, 'ui');
@@ -89,15 +106,25 @@ function main() {
       { from: backendSource, to: 'backend', filter: ['**/*'] },
     ],
     win: {
-      target: args.platform === 'win' ? ['nsis'] : undefined,
+      target: args.platform === 'win' ? [{ target: 'nsis', arch: [args.arch] }] : undefined,
+      icon: path.join(repoRoot, 'electron', 'build', 'icon.ico'),
     },
     mac: {
-      target: args.platform === 'mac' ? ['dmg'] : undefined,
+      target: args.platform === 'mac' ? [{ target: 'dmg', arch: [args.arch] }] : undefined,
+      icon: path.join(repoRoot, 'electron', 'build', 'icon.icns'),
+      category: 'public.app-category.productivity',
+      extendInfo: {
+        NSMicrophoneUsageDescription: 'Push 2 Talk requires microphone access to transcribe speech.',
+        NSAccessibilityUsageDescription: 'Push 2 Talk requires accessibility access to paste transcribed text.',
+      },
     },
     nsis: {
       perMachine: false,
       oneClick: false,
       allowToChangeInstallationDirectory: false,
+      createDesktopShortcut: true,
+      createStartMenuShortcut: true,
+      shortcutName: 'Push 2 Talk',
     },
   };
   if (args.platform === 'win') delete config.mac; else delete config.win;

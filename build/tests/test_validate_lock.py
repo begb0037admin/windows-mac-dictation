@@ -75,6 +75,21 @@ def test_rejects_non_sha256_hash_algorithm():
         )
 
 
+def test_accepts_environment_marker_containing_whitespace():
+    text = (
+        'package==1.2.3 ; python_version >= "3.11" and sys_platform == "win32" \\\n'
+        "    --hash=sha256:1111111111111111111111111111111111111111111111111111111111111111\n"
+    )
+    records = validate_lock.validate_lock_text(text, "<inline>")
+    assert len(records) == 1
+    assert records[0]["name"] == "package"
+
+
+def test_rejects_sha256_digest_with_wrong_length():
+    with pytest.raises(validate_lock.LockError):
+        validate_lock.validate_lock_text("package==1.0 --hash=sha256:1234\n", "<inline>")
+
+
 def test_permits_multiline_continuation_with_multiple_hashes():
     text = (
         "package==1.2.3 \\\n"

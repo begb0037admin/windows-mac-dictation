@@ -58,17 +58,18 @@ test('no temp file is left behind after a successful run (atomic rename)', () =>
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
-test('include-uninstall-hook true adds nsis.include; false omits it', () => {
+test('unverified uninstall hook is mechanically blocked', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-3';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
 
-  run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'true']);
-  const withHook = JSON.parse(fs.readFileSync(output, 'utf8'));
-  assert.ok(withHook.nsis.include, 'expected nsis.include to be set');
+  const blocked = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'true']);
+  assert.equal(blocked.status, 16);
+  assert.ok(!fs.existsSync(output), 'blocked hook must not produce a usable builder config');
 
-  run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  const allowed = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(allowed.status, 0, allowed.stderr);
   const withoutHook = JSON.parse(fs.readFileSync(output, 'utf8'));
   assert.equal(withoutHook.nsis.include, undefined);
 
@@ -99,9 +100,40 @@ test('rejects an invalid platform value', () => {
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
-test('interrupted-write simulation: a pre-existing corrupt output is fully replaced, not merged', () => {
+test('rejects output outside the active run prescribed generated path', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-4';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const wrongOutput = path.join(repoRoot, 'build', 'out', runId, 'wrong', 'electron-builder.json');
+
+  const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', wrongOutput, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 2);
+  assert.ok(!fs.existsSync(wrongOutput));
+
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('generated Windows config fixes architecture, icons, and shortcuts', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-5';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+  assert.deepEqual(config.win.target, [{ target: 'nsis', arch: ['x64'] }]);
+  assert.match(config.win.icon, /icon\.ico$/);
+  assert.equal(config.nsis.shortcutName, 'Push 2 Talk');
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+// Kept alongside the prescribed-path test above (Codex's turn-5 diff dropped
+// this one when adding that test; retained here since it covers a genuinely
+// different behavior - the generator's own code still does atomic
+// temp-write-then-rename and losing test coverage for it isn't warranted).
+test('interrupted-write simulation: a pre-existing corrupt output is fully replaced, not merged', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-6';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
   const generatedDir = path.join(repoRoot, 'build', 'out', runId, 'generated');
   fs.mkdirSync(generatedDir, { recursive: true });

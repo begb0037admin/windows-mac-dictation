@@ -2,14 +2,12 @@
 # implemented this pass - Decision 7). Every run aborts at the first
 # failure. See FINAL_BRIEF.md SS17 for the numbered step list this mirrors.
 #
-# KNOWN OPEN ISSUE (recorded live, 2026-07-28, i1_claude.md has full
-# diagnostics): the packaged app's BACKEND_TIMEOUT path was reproduced
-# 100% of the time when the real Electron app (window + IPC + preload)
-# spawns the backend, despite the identical spawn() call working correctly
-# from a minimal Electron app with no window. Root cause not yet found.
-# This build will produce a real installer, but the installed app is NOT
-# yet confirmed to actually complete backend startup - do not treat a
-# successful build as proof the app works end to end.
+# RESOLVED (was an open issue as of turn 1, i1_claude.md has full diagnostics):
+# the packaged app's BACKEND_TIMEOUT was root-caused in turn 3 to PyInstaller's
+# console=False - fixed to console=True (push2talk-backend.win.spec) with
+# windowsHide:true at spawn time instead (electron/main.js), matching
+# FINAL_BRIEF.md's explicit requirement. Re-verified live: the frozen exe now
+# starts correctly from inside a real windowed Electron app.
 #
 # NOTE: uses direct node_modules/.bin paths, never `npx` - `npx` itself
 # breaks when the repo checkout path contains "&" (reproduced live on this
@@ -27,6 +25,50 @@ $ElectronDir = Join-Path $RepoRoot 'electron'
 function Fail($ExitCode, $Message) {
     Write-Error $Message
     exit $ExitCode
+}
+
+# Turn 5 (Codex, applied by hand turn 6 - the patch itself failed to apply
+# mechanically): validates the existing generated config/metadata pair
+# in place immediately before every builder invocation, rather than
+# regenerating over them - regenerating would silently paper over
+# corruption or a stale file instead of failing closed on it.
+function Assert-GeneratedPair {
+    param(
+        [string]$ConfigPath,
+        [string]$ExpectedRunId,
+        [string]$ExpectedPlatform,
+        [string]$ExpectedArch,
+        [string]$ExpectedBackendSource,
+        [string]$ExpectedOutputDir
+    )
+    $MetaPath = Join-Path (Split-Path $ConfigPath -Parent) 'electron-builder.meta.json'
+    try {
+        $Config = Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
+        $Meta = Get-Content -Raw -LiteralPath $MetaPath | ConvertFrom-Json
+    } catch {
+        Fail 11 "generated builder config/metadata is missing or malformed: $($_.Exception.Message)"
+    }
+
+    $ConfigBackend = $Config.extraResources[1].from
+    if ($Meta.runId -ne $ExpectedRunId -or
+        $Meta.platform -ne $ExpectedPlatform -or
+        $Meta.arch -ne $ExpectedArch -or
+        $Meta.configPath -ne $ConfigPath -or
+        $Meta.backendSource -ne $ExpectedBackendSource -or
+        $Meta.outputDir -ne $ExpectedOutputDir -or
+        $Meta.includeUninstallHook -ne $false -or
+        $ConfigBackend -ne $ExpectedBackendSource -or
+        $Config.directories.output -ne $ExpectedOutputDir) {
+        Fail 11 'generated builder config/metadata does not describe the active run'
+    }
+}
+
+# The checked-in hook is explicitly a pre-observation guess (SS16/SS18). It
+# must not be usable until a bootstrap installation has established the
+# exact Run-key registration and the hook has been rewritten and validated
+# against it - blocked here, not left to caller discipline.
+if ($IncludeUninstallHook) {
+    Fail 16 '-IncludeUninstallHook is blocked: bootstrap registration has not been observed and the checked-in hook is unverified'
 }
 
 # Step 1: version, git SHA, dirty state.
@@ -122,23 +164,45 @@ if ($LASTEXITCODE -ne 0) { Fail 2 'generate-builder-config test failed' }
 # Step 11: freeze the backend into the active run.
 & (Join-Path $RepoRoot 'build\build-backend.ps1') -RunId $RunId -RepoRoot $RepoRoot -VenvPython $VenvPython
 
-# Step 12-13: require the frozen executable, smoke-test stdin/stdout.
+# Step 12-13: require the frozen executable, smoke-test the real backend
+# protocol (turn 5/6: a bare ready-check doesn't prove the stdin command
+# channel works - send get_config and require a valid response).
 $FrozenExe = Join-Path $RunRoot 'backend\push2talk-backend\push2talk-backend.exe'
 if (-not (Test-Path $FrozenExe)) { Fail 12 "frozen backend executable missing: $FrozenExe" }
-# A closed stdin makes the frozen backend exit cleanly after emitting
-# ready+status (confirmed live, I1_findings.md) - PowerShell's `&` call
-# operator has no bash-style `< /dev/null`, so stdin is closed explicitly
-# via .NET Process instead.
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $FrozenExe
 $psi.RedirectStandardInput = $true
 $psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
 $psi.UseShellExecute = $false
+$psi.CreateNoWindow = $true
 $smokeProc = [System.Diagnostics.Process]::Start($psi)
+$smokeStdoutTask = $smokeProc.StandardOutput.ReadToEndAsync()
+$smokeStderrTask = $smokeProc.StandardError.ReadToEndAsync()
+$smokeProc.StandardInput.WriteLine('{"cmd":"get_config"}')
 $smokeProc.StandardInput.Close()
-$smokeOut = $smokeProc.StandardOutput.ReadToEnd()
-$smokeProc.WaitForExit(10000) | Out-Null
-if ($smokeOut -notmatch '"type":\s*"ready"') { Fail 13 'frozen backend did not emit a ready event on a direct stdin/stdout smoke test' }
+if (-not $smokeProc.WaitForExit(20000)) {
+    Stop-Process -Id $smokeProc.Id -Force -ErrorAction SilentlyContinue
+    $smokeProc.WaitForExit(5000) | Out-Null
+    Fail 13 "frozen backend did not answer get_config within 20 seconds (pid $($smokeProc.Id))"
+}
+$smokeOut = $smokeStdoutTask.GetAwaiter().GetResult()
+$null = $smokeStderrTask.GetAwaiter().GetResult()
+$smokeEvents = @()
+foreach ($line in ($smokeOut -split "`r?`n")) {
+    if (-not $line.Trim()) { continue }
+    try {
+        $smokeEvents += $line | ConvertFrom-Json
+    } catch {
+        Fail 13 'frozen backend emitted malformed JSON during get_config smoke test'
+    }
+}
+$ReadyEvent = $smokeEvents | Where-Object { $_.type -eq 'ready' } | Select-Object -First 1
+$ConfigEvent = $smokeEvents | Where-Object { $_.type -eq 'config' } | Select-Object -First 1
+if (-not $ReadyEvent) { Fail 13 'frozen backend did not emit a ready event' }
+if (-not $ConfigEvent -or -not $ConfigEvent.PSObject.Properties['hotkey_raw']) {
+    Fail 13 'frozen backend did not return a valid config response to get_config'
+}
 
 # Step 14: require all four UI source files.
 foreach ($f in @('index.html', 'app.js', 'styles.css', 'logo.svg')) {
@@ -149,12 +213,16 @@ foreach ($f in @('index.html', 'app.js', 'styles.css', 'logo.svg')) {
 $GeneratedConfig = Join-Path $RunRoot 'generated\electron-builder.json'
 & node (Join-Path $RepoRoot 'build\generate-builder-config.js') `
     --platform win --arch $Arch --run-id $RunId --repo-root $RepoRoot `
-    --output $GeneratedConfig --include-uninstall-hook $IncludeUninstallHook.IsPresent.ToString().ToLower()
+    --output $GeneratedConfig --include-uninstall-hook false
 if ($LASTEXITCODE -ne 0) { Fail 11 'generate-builder-config.js failed' }
 $Meta = Get-Content (Join-Path $RunRoot 'generated\electron-builder.meta.json') | ConvertFrom-Json
 if ($Meta.runId -ne $RunId) { Fail 11 're-read metadata run ID does not match this invocation' }
 
-# Step 17: run builder --dir with the explicit generated config.
+$ExpectedBackendSource = Join-Path $RunRoot 'backend\push2talk-backend'
+$ExpectedElectronOutput = Join-Path $RunRoot 'electron'
+
+# Step 17: validate the existing pair immediately before builder --dir.
+Assert-GeneratedPair $GeneratedConfig $RunId 'win' $Arch $ExpectedBackendSource $ExpectedElectronOutput
 Push-Location $ElectronDir
 try {
     & .\node_modules\.bin\electron-builder.cmd --win --dir --config $GeneratedConfig --publish=never
@@ -163,17 +231,30 @@ try {
     Pop-Location
 }
 
-# Step 18-19: discover the unpacked app (SS6.1), verify inventory.
-$UnpackedCandidates = Get-ChildItem (Join-Path $RunRoot 'electron') -Directory -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -like '*-unpacked' }
-if ($UnpackedCandidates.Count -eq 0) { Fail 5 "no *-unpacked directory found under $RunRoot\electron" }
-if ($UnpackedCandidates.Count -gt 1) { Fail 6 "ambiguous unpacked output - multiple *-unpacked directories: $($UnpackedCandidates.Name -join ', ')" }
-$UnpackedDir = $UnpackedCandidates[0].FullName
+# Step 18-19: discover the unpacked app (SS6.1) via bounded structural
+# search - exactly one "Push 2 Talk.exe" with a sibling resources
+# directory - not an assumption that output always has a top-level
+# "*-unpacked" directory name.
+$AppCandidates = @(Get-ChildItem (Join-Path $RunRoot 'electron') -File -Recurse -Filter 'Push 2 Talk.exe' -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path (Join-Path $_.Directory.FullName 'resources') })
+if ($AppCandidates.Count -eq 0) {
+    Fail 5 "no structurally valid unpacked Push 2 Talk.exe found under $RunRoot\electron"
+}
+if ($AppCandidates.Count -gt 1) {
+    Fail 6 "ambiguous unpacked output - found $($AppCandidates.Count) structurally valid application executables"
+}
+$AppExe = $AppCandidates[0]
+$UnpackedDir = $AppExe.Directory.FullName
 $ResourcesDir = Join-Path $UnpackedDir 'resources'
-foreach ($required in @('ui\index.html', 'backend\push2talk-backend.exe')) {
+$ExpectedUiFiles = @('app.js', 'index.html', 'logo.svg', 'styles.css')
+foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\push2talk-backend.exe')) {
     if (-not (Test-Path (Join-Path $ResourcesDir $required))) {
         Fail 19 "packaged inventory missing: resources\$required"
     }
+}
+$ActualUiFiles = @(Get-ChildItem (Join-Path $ResourcesDir 'ui') -File | ForEach-Object { $_.Name } | Sort-Object)
+if (($ActualUiFiles -join '|') -ne (($ExpectedUiFiles | Sort-Object) -join '|')) {
+    Fail 19 "resources\ui must contain exactly four approved files; found: $($ActualUiFiles -join ', ')"
 }
 
 # Step 20-23: launch the unpacked app, human renderer gate, close-and-verify -
@@ -183,11 +264,20 @@ foreach ($required in @('ui\index.html', 'backend\push2talk-backend.exe')) {
 # and cannot be the artifact used for acceptance (SS17.1).
 $SmokeSkipped = $SkipSmokeTest.IsPresent
 if (-not $SmokeSkipped) {
-    $AppExe = Get-ChildItem $UnpackedDir -Filter '*.exe' | Where-Object { $_.Name -ne 'push2talk-backend.exe' } | Select-Object -First 1
-    if (-not $AppExe) { Fail 19 "no application executable found in $UnpackedDir" }
+    # Turn 5/6: a noninteractive session (CI, scheduled task) cannot answer
+    # the y/n gate below - fail closed with a specific exit code rather than
+    # hanging on Read-Host, per SS17.1's noninteractive-shell requirement.
+    if (-not [Environment]::UserInteractive) {
+        Fail 9 'interactive renderer smoke gate is unavailable; rerun interactively or use -SkipSmokeTest to produce an UNVERIFIED artifact'
+    }
     $AppProc = Start-Process -FilePath $AppExe.FullName -PassThru
     Start-Sleep -Seconds 3
-    $BackendProcAtLaunch = Get-Process push2talk-backend -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Turn 5/6: scope backend discovery to this specific launch's own child
+    # process, not a global process-name lookup - a global lookup could
+    # match an unrelated push2talk-backend.exe from a different run.
+    $BackendProcAtLaunch = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ParentProcessId -eq $AppProc.Id -and $_.Name -eq 'push2talk-backend.exe' } |
+        Select-Object -First 1
 
     Write-Host ''
     Write-Host 'Check the running app now:'
@@ -203,11 +293,15 @@ if (-not $SmokeSkipped) {
     }
     if ($attempts -ge 3 -or -not $answer) { Fail 7 'no valid y/n answer after 3 attempts' }
 
-    # Step 22 equivalent: close and verify stopped before continuing.
+    # Step 22 equivalent: close and verify stopped before continuing -
+    # confirmed exit for both recorded PIDs, not just the app's.
     if ($AppProc -and -not $AppProc.HasExited) { Stop-Process -Id $AppProc.Id -Force -ErrorAction SilentlyContinue }
-    if ($BackendProcAtLaunch) { Stop-Process -Id $BackendProcAtLaunch.Id -Force -ErrorAction SilentlyContinue }
+    if ($BackendProcAtLaunch) { Stop-Process -Id $BackendProcAtLaunch.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
     if (Get-Process -Id $AppProc.Id -ErrorAction SilentlyContinue) { Fail 11 'SMOKE_APP_DID_NOT_STOP: app process still running after force-termination' }
+    if ($BackendProcAtLaunch -and (Get-Process -Id $BackendProcAtLaunch.ProcessId -ErrorAction SilentlyContinue)) {
+        Fail 11 'SMOKE_BACKEND_DID_NOT_STOP: recorded backend process still running after force-termination'
+    }
 
     if ($answer -match '^(n|no)$') { Fail 8 'SMOKE_TEST_FAILED: renderer check failed' }
 } else {
@@ -215,10 +309,10 @@ if (-not $SmokeSkipped) {
     $AppProc = [PSCustomObject]@{ StartTime = Get-Date }
 }
 
-# Step 24-26: revalidate config, run NSIS, require the installer.
-& node (Join-Path $RepoRoot 'build\generate-builder-config.js') `
-    --platform win --arch $Arch --run-id $RunId --repo-root $RepoRoot `
-    --output $GeneratedConfig --include-uninstall-hook $IncludeUninstallHook.IsPresent.ToString().ToLower() | Out-Null
+# Step 24-26: revalidate the existing pair (do not regenerate over evidence
+# of corruption between builder calls - turn 5/6 fix), run NSIS, require the
+# installer.
+Assert-GeneratedPair $GeneratedConfig $RunId 'win' $Arch $ExpectedBackendSource $ExpectedElectronOutput
 
 Push-Location $ElectronDir
 try {
