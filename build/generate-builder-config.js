@@ -113,9 +113,17 @@ function main() {
       target: args.platform === 'mac' ? [{ target: 'dmg', arch: [args.arch] }] : undefined,
       icon: path.join(repoRoot, 'electron', 'build', 'icon.icns'),
       category: 'public.app-category.productivity',
+      // FINAL_BRIEF.md SS4 calls for "microphone and Apple Events" usage
+      // descriptions specifically. Accessibility permission (also needed,
+      // for paste simulation - see docs on Input Monitoring/Accessibility
+      // in SS20 M5) has no Info.plist usage-description key at all on
+      // modern macOS - it's granted through a generic System Settings
+      // prompt, not a custom string, so there is nothing to put here for
+      // it. Apple Events (osascript/System Events automation, also used
+      // for paste/focus handling) does require NSAppleEventsUsageDescription.
       extendInfo: {
         NSMicrophoneUsageDescription: 'Push 2 Talk requires microphone access to transcribe speech.',
-        NSAccessibilityUsageDescription: 'Push 2 Talk requires accessibility access to paste transcribed text.',
+        NSAppleEventsUsageDescription: 'Push 2 Talk requires Apple Events access to paste transcribed text into other apps.',
       },
     },
     nsis: {

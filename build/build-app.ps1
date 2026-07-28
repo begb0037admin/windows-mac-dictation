@@ -116,21 +116,21 @@ try {
     Pop-Location
 }
 
-# Step 6-7: generate the Windows icon if absent (electron-builder's own
-# conversion from a single source PNG, not a separate icon-builder tool -
-# electron-icon-builder was dropped after npm audit found 33 vulnerabilities
-# in its dependency tree during this run; see i1_claude.md).
+# Step 6-7 (turn 7 fix - Codex turn-6 review finding 3): generate the
+# Windows icon if absent using build/generate-icon.js, a dependency-free
+# script scoped to exactly this --output file - not electron-builder's own
+# --dir/--publish=never invoked as a side-effecting hack, which silently
+# performed a full unscoped packaging build with no --config/--win of its
+# own. electron-icon-builder itself was dropped earlier after npm audit
+# found 33 vulnerabilities in its dependency tree (see i1_claude.md).
 $IconIco = Join-Path $ElectronDir 'build\icon.ico'
 $IconSourcePng = Join-Path $ElectronDir 'build\icon.png'
 if (-not (Test-Path $IconIco)) {
     if (-not (Test-Path $IconSourcePng)) {
-        Fail 6 "no icon.ico and no source icon.png at $IconSourcePng to generate one from - rasterize ui/logo.svg to a 1024x1024 PNG at that path first (not yet automated this run)."
+        Fail 6 "no icon.ico and no source icon.png at $IconSourcePng to generate one from - rasterize ui/logo.svg (or run build/write-placeholder-icon-png.js for a placeholder) first."
     }
-    # electron-builder generates platform icons from a single source image
-    # when `build.win.icon`/`build.mac.icon` point at a PNG rather than an
-    # already-built .ico/.icns - invoked here standalone via its icon
-    # sub-tool rather than as part of a full package pass.
-    & (Join-Path $ElectronDir 'node_modules\.bin\electron-builder.cmd') --config.win.icon="$IconSourcePng" --dir --publish=never 2>&1 | Out-Null
+    & node (Join-Path $RepoRoot 'build\generate-icon.js') --source $IconSourcePng --output $IconIco --format ico
+    if ($LASTEXITCODE -ne 0) { Fail 6 'generate-icon.js failed to produce icon.ico' }
 }
 if (-not (Test-Path $IconIco) -or (Get-Item $IconIco).Length -eq 0) {
     Fail 6 "icon generation did not produce a nonempty $IconIco"
