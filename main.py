@@ -267,12 +267,25 @@ def handle_command(cmd):
         print(f"[stdin] unknown command: {action!r}", file=sys.stderr)
 
 
+def clean_stdin_line(line: str) -> str:
+    """Strips a leading UTF-8 BOM (U+FEFF) plus surrounding whitespace.
+
+    .NET's Process.StandardInput (used by both Electron's Node child_process
+    on some code paths and PowerShell's ProcessStartInfo, confirmed live via
+    build-app.ps1's own smoke test) can prepend a UTF-8 BOM to the very first
+    write on a redirected stdin pipe, even when the caller writes raw UTF-8
+    bytes with no BOM of its own - json.loads has no BOM tolerance, so strip
+    one defensively before parsing rather than trusting every caller's stdio
+    plumbing not to add one."""
+    return line.lstrip("﻿").strip()
+
+
 def stdin_reader_loop():
     """Blocks on the main thread reading one JSON command per line until
     stdin closes (Electron's child process pipe closing on app quit),
     at which point this returns and main() exits cleanly."""
     for line in sys.stdin:
-        line = line.strip()
+        line = clean_stdin_line(line)
         if not line:
             continue
         try:
