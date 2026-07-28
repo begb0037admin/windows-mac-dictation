@@ -40,6 +40,19 @@ from config import CONFIG_PATH, load_config
 from inject import inject
 from transcribe import transcribe
 
+# A PyInstaller-frozen console exe on Windows does not reliably default its
+# stdio streams to UTF-8 when there is no real console attached (e.g. piped
+# from Electron's child_process, or from .NET's Process.StandardInput as
+# build-app.ps1's own smoke test does) - confirmed live: a UTF-8 BOM
+# (bytes EF BB BF) arriving on stdin was decoded as three separate Latin-1
+# characters ('\xef\xbb\xbf') instead of the single U+FEFF codepoint dev-mode
+# `python main.py` produces for the exact same bytes, which broke every
+# downstream command parse. Force real UTF-8 on all three streams explicitly
+# rather than trusting the frozen build's default encoding detection.
+for _stream in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 # Capture the real stdout before anything else touches it, then redirect
 # sys.stdout to stderr — every existing print() in this file (and any
 # third-party progress-bar output from faster-whisper/huggingface_hub that
