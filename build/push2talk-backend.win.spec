@@ -1,8 +1,13 @@
 # PyInstaller spec for the Windows backend, --onedir per Decision 3 (fast
 # startup for a push-to-talk tool matters more than a single-file installer).
-# console=False: the frozen backend must never show its own terminal window,
-# matching Electron's own console-less packaging - it's spawned as a child
-# process communicating over stdio pipes, never interactively.
+#
+# console=True (corrected turn 3 - was console=False, wrong): FINAL_BRIEF.md
+# is explicit that this must be a normal console-subsystem executable, never
+# --noconsole/--windowed, because the only backend protocol is stdin/stdout
+# and console=False changes the Windows subsystem in a way the brief
+# deliberately avoids for that reason. The console window itself is hidden
+# at spawn time instead, via windowsHide:true on the Node child_process.spawn
+# call in electron/main.js - not by changing the exe's own subsystem.
 #
 # NVIDIA CUDA DLLs (cublas/cudnn/cuda_nvrtc) are loaded by ctranslate2 at
 # runtime via dynamic loading, not a direct Python import PyInstaller's
@@ -85,7 +90,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,

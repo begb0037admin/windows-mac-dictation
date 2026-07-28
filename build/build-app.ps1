@@ -176,40 +176,44 @@ foreach ($required in @('ui\index.html', 'backend\push2talk-backend.exe')) {
     }
 }
 
-if ($SkipSmokeTest) {
-    New-Item -ItemType File -Path (Join-Path $RunRoot 'UNVERIFIED.txt') -Force | Out-Null
-    Write-Host 'build-app: smoke test skipped (-SkipSmokeTest) - UNVERIFIED.txt written. This artifact cannot be the one Kevin installs for acceptance.'
-    exit 0
+# Step 20-23: launch the unpacked app, human renderer gate, close-and-verify -
+# unless -SkipSmokeTest, in which case packaging still proceeds through to a
+# real installer (corrected turn 3 - Codex turn-2 finding: this previously
+# exited before ever building one). The installer is just marked UNVERIFIED
+# and cannot be the artifact used for acceptance (SS17.1).
+$SmokeSkipped = $SkipSmokeTest.IsPresent
+if (-not $SmokeSkipped) {
+    $AppExe = Get-ChildItem $UnpackedDir -Filter '*.exe' | Where-Object { $_.Name -ne 'push2talk-backend.exe' } | Select-Object -First 1
+    if (-not $AppExe) { Fail 19 "no application executable found in $UnpackedDir" }
+    $AppProc = Start-Process -FilePath $AppExe.FullName -PassThru
+    Start-Sleep -Seconds 3
+    $BackendProcAtLaunch = Get-Process push2talk-backend -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    Write-Host ''
+    Write-Host 'Check the running app now:'
+    Write-Host '  - Aurora/neumorphic UI rendered'
+    Write-Host '  - logo visible'
+    Write-Host '  - no ERR_FILE_NOT_FOUND'
+    $attempts = 0
+    $answer = $null
+    while ($attempts -lt 3) {
+        $answer = Read-Host 'Did the packaged renderer pass all three checks? [y/n]'
+        if ($answer -match '^(y|yes|n|no)$') { break }
+        $attempts++
+    }
+    if ($attempts -ge 3 -or -not $answer) { Fail 7 'no valid y/n answer after 3 attempts' }
+
+    # Step 22 equivalent: close and verify stopped before continuing.
+    if ($AppProc -and -not $AppProc.HasExited) { Stop-Process -Id $AppProc.Id -Force -ErrorAction SilentlyContinue }
+    if ($BackendProcAtLaunch) { Stop-Process -Id $BackendProcAtLaunch.Id -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
+    if (Get-Process -Id $AppProc.Id -ErrorAction SilentlyContinue) { Fail 11 'SMOKE_APP_DID_NOT_STOP: app process still running after force-termination' }
+
+    if ($answer -match '^(n|no)$') { Fail 8 'SMOKE_TEST_FAILED: renderer check failed' }
+} else {
+    Write-Host 'build-app: smoke test skipped (-SkipSmokeTest) - packaging continues, artifact will be marked UNVERIFIED and cannot be used for acceptance.'
+    $AppProc = [PSCustomObject]@{ StartTime = Get-Date }
 }
-
-# Step 20-23: launch the unpacked app, human renderer gate, close-and-verify.
-$AppExe = Get-ChildItem $UnpackedDir -Filter '*.exe' | Where-Object { $_.Name -ne 'push2talk-backend.exe' } | Select-Object -First 1
-if (-not $AppExe) { Fail 19 "no application executable found in $UnpackedDir" }
-$AppProc = Start-Process -FilePath $AppExe.FullName -PassThru
-Start-Sleep -Seconds 3
-$BackendProcAtLaunch = Get-Process push2talk-backend -ErrorAction SilentlyContinue | Select-Object -First 1
-
-Write-Host ''
-Write-Host 'Check the running app now:'
-Write-Host '  - Aurora/neumorphic UI rendered'
-Write-Host '  - logo visible'
-Write-Host '  - no ERR_FILE_NOT_FOUND'
-$attempts = 0
-$answer = $null
-while ($attempts -lt 3) {
-    $answer = Read-Host 'Did the packaged renderer pass all three checks? [y/n]'
-    if ($answer -match '^(y|yes|n|no)$') { break }
-    $attempts++
-}
-if ($attempts -ge 3 -or -not $answer) { Fail 7 'no valid y/n answer after 3 attempts' }
-
-# Step 22 equivalent: close and verify stopped before continuing.
-if ($AppProc -and -not $AppProc.HasExited) { Stop-Process -Id $AppProc.Id -Force -ErrorAction SilentlyContinue }
-if ($BackendProcAtLaunch) { Stop-Process -Id $BackendProcAtLaunch.Id -Force -ErrorAction SilentlyContinue }
-Start-Sleep -Seconds 2
-if (Get-Process -Id $AppProc.Id -ErrorAction SilentlyContinue) { Fail 11 'SMOKE_APP_DID_NOT_STOP: app process still running after force-termination' }
-
-if ($answer -match '^(n|no)$') { Fail 8 'SMOKE_TEST_FAILED: renderer check failed' }
 
 # Step 24-26: revalidate config, run NSIS, require the installer.
 & node (Join-Path $RepoRoot 'build\generate-builder-config.js') `
@@ -228,7 +232,11 @@ $Installer = Get-ChildItem (Join-Path $RunRoot 'electron') -Filter '*Setup*.exe'
     Where-Object { $_.CreationTime -ge $AppProc.StartTime }
 if (-not $Installer -or $Installer.Count -ne 1) { Fail 24 'expected exactly one installer artifact created after this run began' }
 
+if ($SmokeSkipped) {
+    New-Item -ItemType File -Path (Join-Path $RunRoot 'UNVERIFIED.txt') -Force | Out-Null
+}
+
 Write-Host ''
-Write-Host "build-app: SUCCESS. run=$RunId installer=$($Installer.FullName)"
+Write-Host "build-app: SUCCESS$(if ($SmokeSkipped) { ' (UNVERIFIED - smoke test skipped, cannot be used for acceptance)' }). run=$RunId installer=$($Installer.FullName)"
 Write-Host "config=$GeneratedConfig meta=$(Join-Path $RunRoot 'generated\electron-builder.meta.json')"
 Write-Host "backend=$FrozenExe resources=$ResourcesDir arch=$Arch git=$GitSha$(if ($GitDirty) { ' (dirty)' })"

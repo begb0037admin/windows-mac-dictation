@@ -58,6 +58,31 @@ test('toggle: both APIs throw - last known actual state is authoritative, no cra
   assert.equal(actual, true);
 });
 
+// Codex turn-2 finding: this case previously warned nothing at all, because
+// actual (true, from lastKnownAutostart) happened to equal wanted (true) -
+// but nothing was actually verified, since both APIs threw.
+test('toggle: both APIs throw and retained state coincidentally equals request - still warns', () => {
+  const ctx = fakeCtx({
+    setLoginItemSettings: () => { throw new Error('boom'); },
+    getLoginItemSettings: () => { throw new Error('boom2'); },
+  });
+  applyAutostartToggle(ctx, true, true /* lastKnownAutostart */);
+  assert.equal(ctx.calls.sendAppError.length, 1, 'an exception must always warn, even when the coincidental value matches');
+  assert.equal(ctx.calls.sendAppError[0].code, 'LOGIN_ITEM_FAILED');
+});
+
+// Codex turn-2 finding: this previously returned silently with no warning.
+test('startup reconcile: OS read throws - warns, does not crash, forwards stored value unchanged', () => {
+  const ctx = fakeCtx({
+    getLoginItemSettings: () => { throw new Error('boom'); },
+  });
+  const { configEvent, lastKnownAutostart } = reconcileLoginItemOnStartup(ctx, { autostart: true }, false);
+  assert.equal(configEvent.autostart, true, 'stored value forwarded unchanged since OS state could not be read');
+  assert.equal(lastKnownAutostart, false, 'lastKnownAutostart is untouched, not silently overwritten');
+  assert.equal(ctx.calls.sendAppError.length, 1);
+  assert.equal(ctx.calls.sendAppError[0].code, 'LOGIN_ITEM_FAILED');
+});
+
 test('startup reconcile: stored matches actual - no-op, no warning', () => {
   const ctx = fakeCtx({ getLoginItemSettings: () => ({ openAtLogin: true }) });
   const { configEvent } = reconcileLoginItemOnStartup(ctx, { autostart: true }, false);

@@ -79,7 +79,11 @@ function main() {
       // never depends on the caller's cwd.
       output: outputDir,
     },
-    files: ['main.js', 'preload.js', 'package.json'],
+    // Corrected turn 3 (Codex turn-2 finding): main.js requires() diagnostics.js/
+    // login-item-logic.js/fatal-gate.js at runtime - omitting them from the
+    // packaged app.asar would make the packaged app fail to launch with
+    // MODULE_NOT_FOUND. Every module main.js actually loads must be listed.
+    files: ['main.js', 'preload.js', 'package.json', 'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js'],
     extraResources: [
       { from: uiSource, to: 'ui', filter: ['index.html', 'app.js', 'styles.css', 'logo.svg'] },
       { from: backendSource, to: 'backend', filter: ['**/*'] },

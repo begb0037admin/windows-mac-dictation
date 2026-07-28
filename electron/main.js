@@ -63,8 +63,12 @@ function appendLog(prefix, text) {
 
 function resolveBackendCommand() {
   if (app.isPackaged) {
+    const backendDir = path.join(process.resourcesPath, 'backend');
     const exeName = process.platform === 'darwin' ? 'push2talk-backend' : 'push2talk-backend.exe';
-    return { command: path.join(process.resourcesPath, 'backend', exeName), args: [], cwd: process.resourcesPath };
+    // cwd is the backend's own directory (corrected turn 3 - was
+    // process.resourcesPath, the parent of it), matching where the frozen
+    // --onedir build's _internal/ dependency tree actually lives.
+    return { command: path.join(backendDir, exeName), args: [], cwd: backendDir };
   }
   const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
   return { command: pythonExe, args: ['main.py'], cwd: REPO_ROOT };
@@ -111,12 +115,29 @@ function onBackendTimeout(which) {
 
 function armDeadlines() {
   clearDeadlines();
+  stoppedSendingCommands = false;
+  backendReady = false; // fresh tracking for this (re)spawned backend process
   progressTimer = setTimeout(() => onBackendTimeout('progress'), 30 * 1000);
   absoluteTimer = setTimeout(() => onBackendTimeout('absolute'), 10 * 60 * 1000);
 }
 
+// Corrected turn 3 (Codex turn-2 finding): SS12.2 says the absolute deadline
+// runs "from spawn until ready, never reset" - its entire purpose is
+// bounding time-to-ready, not the whole session. Once a genuine `ready`
+// event has fired once, both deadlines are cleared permanently, not just
+// the progress one - otherwise a perfectly healthy session hits
+// BACKEND_TIMEOUT 10 minutes after spawn regardless of activity, and a
+// merely-idle-for-30s session (nothing to report - no dictation in
+// progress) would spuriously hit the progress deadline too.
+let backendReady = false;
+
+function markBackendReady() {
+  backendReady = true;
+  clearDeadlines();
+}
+
 function resetProgressDeadline() {
-  if (stoppedSendingCommands) return;
+  if (stoppedSendingCommands || backendReady) return;
   if (progressTimer) clearTimeout(progressTimer);
   progressTimer = setTimeout(() => onBackendTimeout('progress'), 30 * 1000);
 }
@@ -239,9 +260,19 @@ function spawnBackend(win) {
     env.PUSH2TALK_CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
   }
 
+  // windowsHide: true (packaged only) is what actually hides the backend's
+  // console window per FINAL_BRIEF.md - the exe itself stays a normal
+  // console-subsystem build (push2talk-backend.win.spec: console=True,
+  // corrected turn 3) so stdin/stdout redirection keeps working exactly as
+  // observed in dev mode; only the visible window is suppressed, at spawn
+  // time, not by changing the executable's own subsystem. [VALIDATION V5,
+  // not yet live-verified on an installed copy - see i3_claude.md.]
+  const spawnOptions = { cwd, env };
+  if (app.isPackaged) spawnOptions.windowsHide = true;
+
   let child;
   try {
-    child = spawn(command, args, { cwd, env });
+    child = spawn(command, args, spawnOptions);
   } catch (e) {
     fatalNative('BACKEND_MISSING', 'The dictation backend could not be started.', {
       error_class: e && e.constructor ? e.constructor.name : 'Error',
@@ -268,7 +299,9 @@ function spawnBackend(win) {
       appendLog('main', `malformed JSON from backend, skipping (len=${line.length})`);
       return;
     }
-    if (evt && (evt.type === 'status' || evt.type === 'config' || evt.type === 'ready')) {
+    if (evt && evt.type === 'ready') {
+      markBackendReady();
+    } else if (evt && (evt.type === 'status' || evt.type === 'config')) {
       resetProgressDeadline();
     }
     if (evt && evt.type === 'config') {
@@ -372,7 +405,15 @@ function createWindow() {
 
   win.once('ready-to-show', () => win.show());
 
-  const indexPath = path.join(__dirname, '..', 'ui', 'index.html');
+  // Corrected turn 3 (Codex turn-2 finding): dev mode's ui/ lives next to
+  // electron/ in the repo, but a packaged app's `files` list packs only
+  // main.js/preload.js/package.json into app.asar - ui/ is copied via
+  // extraResources instead, landing at resources/ui/, not
+  // resources/app.asar/ui/. __dirname-relative resolution silently pointed
+  // at a path that doesn't exist once packaged.
+  const indexPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'ui', 'index.html')
+    : path.join(__dirname, '..', 'ui', 'index.html');
   if (!fs.existsSync(indexPath)) {
     // UI_MISSING: the renderer panel necessarily can't show (there's no
     // renderer to show it in) - the native dialog is the only channel.

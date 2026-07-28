@@ -23,23 +23,30 @@ const { sanitizeStderrLine } = require('./diagnostics');
 function applyAutostartToggle(ctx, requested, lastKnownAutostart) {
   const wanted = Boolean(requested);
   let errorClass;
+  let errored = false;
   try {
     ctx.setLoginItemSettings({ openAtLogin: wanted });
   } catch (e) {
     errorClass = e && e.constructor ? e.constructor.name : 'Error';
+    errored = true;
   }
   let actual = lastKnownAutostart;
   try {
     actual = ctx.getLoginItemSettings().openAtLogin;
   } catch (e) {
     errorClass = errorClass || (e && e.constructor ? e.constructor.name : 'Error');
+    errored = true;
     // step 8: read failed - the last known actual state remains authoritative.
   }
 
   ctx.writeToBackend({ cmd: 'save_config', data: { autostart: actual } });
   ctx.sendToRenderer({ type: 'config', autostart: actual });
 
-  if (actual !== wanted) {
+  // Corrected turn 3 (Codex turn-2 finding): warn whenever either API threw,
+  // not only when actual happens to differ from wanted - a caught exception
+  // means nothing was actually verified, even if the retained state
+  // coincidentally equals the request (e.g. both throw while already true).
+  if (actual !== wanted || errored) {
     ctx.appendLog('diag', sanitizeStderrLine(`P2T_DIAG ${JSON.stringify({ code: 'LOGIN_ITEM_FAILED', requested: wanted, actual, error_class: errorClass })}`));
     ctx.sendAppError({
       severity: 'warning',
@@ -60,7 +67,18 @@ function reconcileLoginItemOnStartup(ctx, configEvent, lastKnownAutostart) {
   try {
     actual = ctx.getLoginItemSettings().openAtLogin;
   } catch (e) {
-    return { configEvent, lastKnownAutostart }; // can't read OS state - forward stored value unchanged
+    // Corrected turn 3 (Codex turn-2 finding): a startup read failure must
+    // not return silently - warn, then forward the stored value unchanged
+    // since OS state genuinely could not be verified.
+    const errorClass = e && e.constructor ? e.constructor.name : 'Error';
+    ctx.appendLog('diag', sanitizeStderrLine(`P2T_DIAG ${JSON.stringify({ code: 'LOGIN_ITEM_FAILED', requested: stored, actual: null, error_class: errorClass })}`));
+    ctx.sendAppError({
+      severity: 'warning',
+      code: 'LOGIN_ITEM_FAILED',
+      message: 'Run on login could not be verified',
+      detail: { requested: stored, actual: null },
+    });
+    return { configEvent, lastKnownAutostart };
   }
 
   if (stored === actual) {
