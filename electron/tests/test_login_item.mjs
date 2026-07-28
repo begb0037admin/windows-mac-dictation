@@ -15,6 +15,14 @@ function fakeCtx(overrides = {}) {
   };
 }
 
+// Codex turn-4 finding: Boolean("false") === true in JavaScript - a naive
+// coercion would treat the string "false" as a request to enable autostart.
+test('toggle: non-boolean input ("false" string) is rejected, not coerced to true', () => {
+  const ctx = fakeCtx({ getLoginItemSettings: () => ({ openAtLogin: false }) });
+  applyAutostartToggle(ctx, 'false', false);
+  assert.deepEqual(ctx.calls.sendToRenderer, [{ type: 'config', autostart: false }], 'the string "false" must not be treated as a request to enable autostart');
+});
+
 test('toggle: setter and read-back agree - no warning, forwards actual', () => {
   const ctx = fakeCtx({ getLoginItemSettings: () => ({ openAtLogin: true }) });
   const actual = applyAutostartToggle(ctx, true, false);

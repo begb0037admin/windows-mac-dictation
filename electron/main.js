@@ -255,9 +255,14 @@ function spawnBackend(win) {
   const { command, args, cwd } = resolveBackendCommand();
   const env = { ...process.env, PYTHONUNBUFFERED: '1' };
   if (app.isPackaged) {
-    // Packaged config lives in userData, never inside the (typically not
-    // user-writable) install tree - see config.py's resolve_config_path().
-    env.PUSH2TALK_CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
+    // Corrected turn 4 (Codex finding): FINAL_BRIEF.md SS5's exact contract
+    // is P2T_CONFIG_DIR (a directory), not a full file path - turn 1
+    // independently reinvented a differently-shaped variable instead of
+    // using the one the brief already specified. Never inside
+    // process.resourcesPath (typically not user-writable, would defeat
+    // uninstall's "preserve userData" requirement) - see config.py's
+    // resolve_config_path().
+    env.P2T_CONFIG_DIR = app.getPath('userData');
   }
 
   // windowsHide: true (packaged only) is what actually hides the backend's

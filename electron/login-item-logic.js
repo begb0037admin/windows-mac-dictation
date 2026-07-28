@@ -21,7 +21,12 @@ const { sanitizeStderrLine } = require('./diagnostics');
  * state and forwards/displays only that - never the unverified request.
  * Returns the final actual value (also the new lastKnownAutostart). */
 function applyAutostartToggle(ctx, requested, lastKnownAutostart) {
-  const wanted = Boolean(requested);
+  // Corrected turn 4 (Codex finding): Boolean(requested) coerces any
+  // non-empty string ("false" included) to true. IPC input is not trusted
+  // input just because today's renderer always sends a real boolean -
+  // anything other than a literal true/false is rejected (treated as false,
+  // the safer default) rather than loosely coerced.
+  const wanted = typeof requested === 'boolean' ? requested : false;
   let errorClass;
   let errored = false;
   try {
