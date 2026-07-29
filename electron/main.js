@@ -14,7 +14,7 @@
 // push2talk-packaging run), the login-item toggle/reconciliation contract
 // (SS11), and the runtime diagnostics sanitization boundary (SS15).
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 const readline = require('readline');
 const fs = require('fs');
@@ -78,6 +78,7 @@ function resolveBackendCommand() {
 
 let mainWindow = null;
 let pythonProcess = null;
+let tray = null;
 // The single module-level "fatal handling started" flag every section of
 // SS12/13 refers to - owned exclusively by fatalNative() via this FatalGate
 // (fatal-gate.js, unit-tested in isolation). No other function sets a flag
@@ -387,6 +388,54 @@ ipcMain.on('close-window', (event) => {
   if (win) win.close();
 });
 
+// ---------- System tray ----------
+// Kevin: closing the window (X, the in-app close button, or Alt+F4) should
+// hide to tray, not quit - the app is only fully closed via the tray's own
+// "Exit" item (or the machine restarting, which naturally kills the
+// process). Reuses the existing `appQuitting` flag (already the single
+// source of truth fatalNative() checks) rather than introducing a second,
+// separate "are we quitting" flag.
+
+function resolveTrayIconPath() {
+  // Packaged: pull the icon already embedded in the running exe by
+  // electron-builder's own `icon` config (no extraResources entry needed).
+  // Dev mode: no custom-icon exe exists (it's just electron.exe), so read
+  // the committed source file directly - present on disk, unpacked.
+  if (app.isPackaged) {
+    return nativeImage.createFromPath(process.execPath);
+  }
+  return nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.ico'));
+}
+
+function createTray(win) {
+  const icon = resolveTrayIconPath();
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+  tray.setToolTip('Push 2 Talk');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: 'Show Push 2 Talk', click: () => {
+        win.show();
+        win.focus();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Exit', click: () => {
+        appQuitting = true;
+        app.quit();
+      },
+    },
+  ]));
+  tray.on('click', () => {
+    if (win.isVisible()) {
+      win.hide();
+    } else {
+      win.show();
+      win.focus();
+    }
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 400,
@@ -458,6 +507,18 @@ function createWindow() {
   win.loadFile(indexPath);
 
   spawnBackend(win);
+  createTray(win);
+
+  // 'close' fires before the window is destroyed and can be cancelled,
+  // unlike 'closed' below - hide instead of actually closing, unless the
+  // app is genuinely quitting (tray Exit, a fatal error, or
+  // window-all-closed's own non-mac fallback all set appQuitting first).
+  win.on('close', (event) => {
+    if (!appQuitting) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
