@@ -25,7 +25,7 @@ Build the MVP checklist in `docs/BUILD_BRIEF.md` §4, in the order listed, testi
 
 ## Architecture
 See `ARCHITECTURE.md` for the full component table, threading model, state machine, and data flow. Design constraints that must not be silently reintroduced:
-- **No system tray.** Kevin asked for a normal, always-visible app window instead of a background tray utility (see `docs/BUILD_BRIEF.md` §11).
+- **System tray (added 2026-07-29, reverses the original "no system tray" decision below).** Kevin explicitly asked for minimize-to-tray: the window still opens normally and stays always-visible/always-on-top by default (the original always-visible intent is preserved) - closing it (X, the in-app close button, or Alt+F4) hides it to the tray instead of quitting. The app is only fully closed via the tray icon's own "Exit" item, or the machine restarting. Do not silently revert this back to quit-on-close. *(Original 2026-07 reasoning, now superseded: "Kevin asked for a normal, always-visible app window instead of a background tray utility" — docs/BUILD_BRIEF.md §11.)*
 - **Live captions, not live typing.** The live partial transcript is feedback only, shown in this app's own window — never typed directly into the focused app (rejected as too fragile, §11).
 - **No file transcription.** That belongs to `meeting-transcriber`, not this repo.
 
