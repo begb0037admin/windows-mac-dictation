@@ -397,12 +397,15 @@ ipcMain.on('close-window', (event) => {
 // separate "are we quitting" flag.
 
 function resolveTrayIconPath() {
-  // Packaged: pull the icon already embedded in the running exe by
-  // electron-builder's own `icon` config (no extraResources entry needed).
-  // Dev mode: no custom-icon exe exists (it's just electron.exe), so read
-  // the committed source file directly - present on disk, unpacked.
+  // nativeImage.createFromPath(process.execPath) does NOT work on Windows -
+  // that API decodes actual image files, it does not extract the icon
+  // resource embedded in an exe (that silently produced an empty image,
+  // which is why the tray slot rendered blank while still registering a
+  // tooltip). Packaged: read the icon shipped as an extraResource
+  // (generate-builder-config.js). Dev mode: read the committed source file
+  // directly - present on disk, unpacked.
   if (app.isPackaged) {
-    return nativeImage.createFromPath(process.execPath);
+    return nativeImage.createFromPath(path.join(process.resourcesPath, 'icons', 'icon.ico'));
   }
   return nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.ico'));
 }

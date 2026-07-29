@@ -127,6 +127,21 @@ test('generated Windows config fixes architecture, icons, and shortcuts', () => 
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
+test('packaged app ships the tray icon as a real extraResource (not extracted from the exe)', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-7';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+  const iconResource = config.extraResources.find((r) => r.to === 'icons');
+  assert.ok(iconResource, 'must ship an "icons" extraResource so main.js can load it via process.resourcesPath at runtime');
+  assert.deepEqual(iconResource.filter, ['icon.ico']);
+  assert.match(iconResource.from, /electron[\\/]build$/);
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
 // Kept alongside the prescribed-path test above (Codex's turn-5 diff dropped
 // this one when adding that test; retained here since it covers a genuinely
 // different behavior - the generator's own code still does atomic

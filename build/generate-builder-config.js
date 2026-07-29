@@ -104,6 +104,11 @@ function main() {
     extraResources: [
       { from: uiSource, to: 'ui', filter: ['index.html', 'app.js', 'styles.css', 'logo.svg'] },
       { from: backendSource, to: 'backend', filter: ['**/*'] },
+      // Tray icon: nativeImage.createFromPath(process.execPath) does NOT
+      // extract the icon embedded in the exe on Windows (that's not what
+      // the API does - it decodes actual image files), so the packaged
+      // app must ship icon.ico as a real resource and load it directly.
+      { from: path.join(repoRoot, 'electron', 'build'), to: 'icons', filter: ['icon.ico'] },
     ],
     win: {
       target: args.platform === 'win' ? [{ target: 'nsis', arch: [args.arch] }] : undefined,

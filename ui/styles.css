@@ -626,6 +626,12 @@ select.field option {
   color: var(--ink);
 }
 
+select.field optgroup {
+  background: var(--bg);
+  color: var(--ink-muted);
+  font-style: normal;
+}
+
 /* ── Switch toggle ── */
 
 .switch-row {
