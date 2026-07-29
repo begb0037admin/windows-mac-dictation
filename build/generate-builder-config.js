@@ -59,8 +59,21 @@ function main() {
   // Turn 5 (Codex, applied by hand turn 6 after the patch itself failed to
   // apply mechanically): --output must be exactly the active run's
   // prescribed path, never an arbitrary caller-supplied location.
+  //
+  // --output doesn't exist on disk yet, so it can't be fs.realpathSync()'d
+  // directly - instead express it relative to the *raw* --repo-root (which
+  // the caller built it from) and rejoin onto repoRoot's already-resolved
+  // realpath. A naive path.resolve(args.output) vs. a realpath'd prescribed
+  // path breaks on macOS specifically, where os.tmpdir() (and therefore any
+  // run directory under it) lives under /var/folders/..., itself a symlink
+  // to /private/var/folders/... - found running this repo's own test suite
+  // on real Apple Silicon hardware for the first time (2026-07-29).
   const prescribedOutput = path.join(runRootReal, 'generated', 'electron-builder.json');
-  if (path.resolve(args.output) !== prescribedOutput) {
+  const rawRepoRoot = path.resolve(args['repo-root']);
+  const rawOutput = path.resolve(args.output);
+  const outputRelativeToRepo = path.relative(rawRepoRoot, rawOutput);
+  const resolvedOutput = path.join(repoRoot, outputRelativeToRepo);
+  if (resolvedOutput !== prescribedOutput) {
     fatal(2, `--output must be the active run's prescribed generated path: ${prescribedOutput}`);
   }
 
