@@ -467,9 +467,14 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
     },
-    // macOS only — ignored elsewhere.
-    vibrancy: 'hud',
-    visualEffectState: 'active',
+    // macOS only — ignored elsewhere. vibrancy/visualEffectState removed
+    // 2026-07-29: the 'hud' material's own native rendering carries a
+    // built-in soft edge (Apple's HUD panel HIG style), visible as a
+    // residual border even with hasShadow:false fully suppressed on every
+    // lifecycle event - independent of this bug, and independent of the
+    // app's own CSS-driven opacity-glass/-translucent look (styles.css),
+    // which never relied on this option. Kevin wants zero visible border;
+    // the CSS background alone now supplies the look.
     roundedCorners: true,
   });
   mainWindow = win;
@@ -478,6 +483,17 @@ function createWindow() {
   // enough, but call it explicitly too in case that option doesn't fully
   // apply on this Electron/Windows combination.
   win.setHasShadow(false);
+
+  // macOS-specific gap found live on real Apple Silicon hardware
+  // (2026-07-29): a frameless transparent BrowserWindow redraws the native
+  // OS shadow the moment it receives focus, even after an earlier
+  // setHasShadow(false) call - a known Electron bug (electron/electron#7448).
+  // The constructor option and the call above only cover the window's
+  // initial unfocused state; re-assert on every focus so the shadow never
+  // comes back once the window is actually shown and used.
+  win.on('focus', () => win.setHasShadow(false));
+  win.on('blur', () => win.setHasShadow(false));
+  win.on('show', () => win.setHasShadow(false));
 
   // Same belt-and-suspenders reasoning for alwaysOnTop - explicit call
   // in addition to the constructor option. 'floating' keeps it above
