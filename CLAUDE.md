@@ -49,7 +49,7 @@ Before any task where higher effort is warranted, signal to Kevin: what the task
 - Never commit credentials or API keys — the MVP needs none; if a cloud cleanup toggle is added later, keys live in env vars only
 - The brief (`docs/BUILD_BRIEF.md` §1–10) defines scope — do not add stretch goals (§5) before the MVP checklist (§4) is complete and working on both platforms
 - Build and test one MVP checklist item at a time — Kevin confirms each step works on **both** Windows and Mac before the next is built
-- This is a local app on two machines — Claude Code writes and pushes the code but cannot run or test it (no mic, no hotkey listener, no GPU in the cloud sandbox on either OS); Kevin runs and verifies on the admin machine and the Mac
+- This is a local app on two machines. The default assumption is Claude Code writes and pushes the code but cannot run or test it (no mic, no hotkey listener, no GPU in a cloud sandbox); Kevin runs and verifies. **This does not hold when Claude Code is running directly on one of the two machines themselves** (confirmed first on Windows 2026-07-09, again on Mac 2026-07-30, `kevins-MBP`) — in that case Claude Code can run builds, test suites, and even visual smoke-checks (screenshot + inspect) directly. Live hotkey-press/mic/speech testing still needs Kevin physically present regardless of where Claude Code runs.
 - Always update `HANDOVER.md` at end of session
 - All mockups and visual designs are produced as Claude Artifacts — never committed to the repository (see CONSTITUTION.md Section 11)
 

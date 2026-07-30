@@ -2,7 +2,20 @@
 
 > See also: `ARCHITECTURE.md` (current-state component/threading/state-machine reference), `docs/BUILD_BRIEF.md` (build history and amendment rationale), `CLAUDE.md` (bootstrap/hard rules).
 
-**Last updated:** 2026-07-29 — **Windows locked in.** Kevin: "All working, we can lock it in... Good work, well done." Next step: Mac (see bottom of this entry — real Apple Silicon hardware required, nothing further possible from this environment).
+**Last updated:** 2026-07-30 — **Mac phase underway on real Apple Silicon.** This session runs directly on Kevin's actual Mac (`kevins-MBP`, Apple M1 Pro, arm64) — the hardware the Mac phase was blocked on. Backfilling two undocumented commits below, then continuing the packaging pipeline.
+
+## Session 2026-07-30 — Mac phase resumed; backfilling undocumented dev-mode work; packaging pipeline underway
+
+**Backfill note:** two commits landed on 2026-07-29 at 16:19, *after* that day's "Windows locked in, Mac unverified" entry was written, but were never logged here — recording them now per `CONSTITUTION.md` §5:
+
+1. **`32363f0`** — `generate-builder-config.js`'s `--output` path validation compared a raw `path.resolve()` against a `realpath()`'d prescribed path, but never resolved `--output` itself through symlinks. Broke specifically on macOS, where `os.tmpdir()` lives under `/var/folders/...`, itself a symlink to `/private/var/folders/...`. Found running this repo's own test suite (`test_generate_builder_config.mjs`, all 6 cases) on real Apple Silicon for the first time. Fixed by expressing `--output` relative to the raw `--repo-root` and rejoining onto `repoRoot`'s already-resolved realpath, instead of realpathing a file that doesn't exist yet.
+2. **`26d5153`** — the frameless/transparent window showed a visible light border/shadow on Mac dev-mode (`npm start`), which Kevin asked to eliminate fully. Three layered causes: (a) a CSS `box-shadow` on `.app` left over from Windows (where it substituted for a properly-clipped native shadow) compounded the look on Mac; (b) `hasShadow:false` only covers the window's initial unfocused state — macOS redraws the native OS shadow on focus/blur/show for a frameless transparent `BrowserWindow` (`electron/electron#7448`), needing explicit re-assertion on all three events; (c) the actual root cause was `vibrancy:'hud'` itself — Apple's HUD material carries its own native soft edge independent of `hasShadow` entirely, and was never wired to this app's own CSS-driven opacity look. Removed `vibrancy`/`visualEffectState`; confirmed borderless live afterward. The focus/blur/show reassertion was kept regardless, as a real guard against the Electron bug if vibrancy is ever reintroduced.
+
+Both commits are authored `Kev <kevin@lelitte.co.uk>` — Kevin working directly against a local clone (`~/Developer/windows-mac-dictation`) on this Mac, evidently via a local Claude Code session, prior to this conversation.
+
+**Also observed (not committed):** that same local clone has an uncommitted `config.json` — `theme: light` (was `dark`), `alwaysOnTop: true` (new), and `hotkey.darwin: mouse_middle` (was `alt_l`). Left as-is — this reads as Kevin's own personal local dev-mode experimentation (matching the mouse-hotkey testing already done on the Windows side), not a decision to change the shipped defaults, so it hasn't been committed or reverted.
+
+**Status:** dev-mode Mac Electron shell is confirmed running and borderless on real hardware; the test suite has been run here for real (catching the symlink bug above). Packaging (`build-app.sh`, PyInstaller freeze, DMG) has not yet been attempted — see next session entry for that work.
 
 ## Session 2026-07-29 — Windows locked in: tray icon + mouse hotkey bugs found and fixed, packaging pipeline hardened
 
