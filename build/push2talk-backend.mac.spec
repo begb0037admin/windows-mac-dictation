@@ -24,16 +24,35 @@
 # FINAL_BRIEF.md SS20) before this spec can be considered anything but a
 # best-effort starting point - no Mac build has ever been attempted.
 
+import glob
 import os
 
 block_cipher = None
 
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, '..'))
 
+# Found on real Apple Silicon (2026-07-30): PyInstaller's static dependency
+# scanner missed libjaccl.dylib, a sibling native library libmlx.dylib
+# itself depends on via @rpath (`otool -L` confirms it, and it's genuinely
+# present in the mlx package's own lib/ directory) - the frozen bundle
+# built without this fix was missing it entirely, which would only surface
+# as a crash the moment mlx_whisper actually runs Metal inference, not at
+# import time or in the lightweight get_config smoke test build-app.sh
+# runs. Explicitly bundling every .dylib mlx ships (not just the one this
+# session found missing) is more robust against PyInstaller's scanner
+# missing others the same way.
+import mlx
+# mlx is a namespace package - __file__ is None, __path__ is the real thing.
+MLX_LIB_DIR = os.path.join(list(mlx.__path__)[0], 'lib')
+mlx_dylibs = [
+    (path, 'mlx/lib')
+    for path in glob.glob(os.path.join(MLX_LIB_DIR, '*.dylib'))
+]
+
 a = Analysis(
     [os.path.join(REPO_ROOT, 'main.py')],
     pathex=[REPO_ROOT],
-    binaries=[],
+    binaries=mlx_dylibs,
     datas=[],
     hiddenimports=[
         'mlx_whisper',
