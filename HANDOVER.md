@@ -2,7 +2,26 @@
 
 > See also: `ARCHITECTURE.md` (current-state component/threading/state-machine reference), `docs/BUILD_BRIEF.md` (build history and amendment rationale), `CLAUDE.md` (bootstrap/hard rules).
 
-**Last updated:** 2026-07-30 — **Mac phase underway on real Apple Silicon.** This session runs directly on Kevin's actual Mac (`kevins-MBP`, Apple M1 Pro, arm64) — the hardware the Mac phase was blocked on. Backfilling two undocumented commits below, then continuing the packaging pipeline.
+**Last updated:** 2026-07-30 — **Mac dev-mode confirmed working end-to-end; waveform reworked and locked in.** Packaging was attempted once (see below) but paused per Kevin's direction: don't build/package further until core functionality and visuals are confirmed. That confirmation now exists for dictation+paste; the waveform work in this session's second half is the visual side of that.
+
+## Session 2026-07-30 (continued) — Paste confirmed working; full waveform rework (idle/active unification, pill matching)
+
+**Paste bug, resolved (not a regression):** Kevin reported paste "not working" in Teams/Notes. Investigation traced this to the 2026-07-27 decision (commit `c57733a`) to drop the review/Send-button step entirely in favour of full auto-send — a deliberate, Kevin-confirmed choice, not a regression. Kevin confirmed today: **"we want instant paste, the review take place in the app we paste into"** — full auto-send is correct, working as designed. The actual test failure was a methodology problem (testing without a genuine clicked-in text cursor); once Kevin clicked into a real compose box and spoke, paste landed correctly. No code change needed here.
+
+**Waveform reworked, several rounds of live feedback against a reference image, ending "good lock it in"** (commit `9444ba0`):
+- Idle used to be a separate CSS `scaleY` animation on an 8px base while active set real pixel heights up to 60px via JS — looked like two different-sized components. Idle now runs through the *same* `paintBar()` rendering as active (a new `requestAnimationFrame` loop, `startIdleShimmer()`/`idleShimmerTick()`), just fed a gentle synthetic level instead of real mic RMS — same size/motion mechanics, idle stays monochrome (`chromeColor()`) while active keeps Aurora colors (`auroraColor()`).
+- Fixed a real color-washout bug: bar opacity used to scale down with level, which against the light-theme panel's near-white background faded quieter bars toward grey/white. Opacity is now constant; only height conveys level.
+- Every bar previously scrolled the same single RMS scalar (one loudness-history value), reading as a flat plateau during sustained speech. Added per-bar wobble shaping (`shapeLevel()`) for an irregular, spectrum-like ripple — the cheap alternative to real per-frequency FFT analysis, which would need a Python audio-pipeline change.
+- Mini pill (fewer bars, smaller size) still looked flatter than the full view with identical formulas: fewer bars completed fewer visible ripples of the same phase formula (fixed via `WAVE_PHASE_SCALE`, normalizing phase to fraction-across-view rather than raw index), and its smaller physical size needs proportionally more motion to read as equally alive (`PILL_ANIMATION_BOOST`, 1.8x, applied to both idle and active pill rendering) — Kevin's own diagnosis, confirmed correct.
+- Final tuning: slowed the idle shimmer's spatial frequency and raised its baseline so wider clumps of bars read as solid together, rather than isolated peaks in a sea of thin dashes.
+
+**Mac packaging attempt (this session, earlier) — real progress, deliberately not pursued further right now:**
+- Generated the two previously-missing lock files on real Apple Silicon for the first time (`build/lock/mac-arm64.txt`, `build/lock/build-tools.mac-arm64.txt`, via `pip-compile --generate-hashes --allow-unsafe`) — Decision 7 explicitly required real hardware for this, which this session now has. **Not yet committed** — held back with the rest of the packaging work per Kevin's pause.
+- Found and fixed a real bug: `build/build-app.sh` and `build/build-backend.sh` were missing their executable bit, so the pipeline couldn't even start. **Not yet committed**, same reason.
+- Ran the full pipeline once (`--skip-smoke-test`) — it succeeded end to end, producing a real `.app` and `.dmg` for the first time on Mac. Found (and explained, not fixed — no fix needed) that the packaged `.app` fails its own Accessibility/Input Monitoring preflight check on first launch, correctly, since it's a brand-new never-before-approved app bundle — working as designed, not a bug, and not something Claude Code can grant on Kevin's behalf (macOS requires a human to click that checkbox).
+- **Kevin's direction: don't resume packaging until dictation core functionality and visuals are confirmed working.** That gate is now cleared (paste confirmed, waveform locked in) — if resuming, the lock files and chmod fix above are ready to commit, and `build/build-app.sh --skip-smoke-test` is known to work end-to-end on this machine.
+
+**Environment note:** this Mac (`kevins-MBP`) already has everything the Mac build needs pre-installed: Python 3.14.6 arm64, Node/npm, Ollama with `llama3.2:3b` pulled, git. Two local clones exist — `~/Developer/windows-mac-dictation` (current, on `main`, the one actually used this session) and a stale `~/windows-mac-dictation` (old repo name/remote, untouched, likely safe to ignore or clean up later).
 
 ## Session 2026-07-30 — Mac phase resumed; backfilling undocumented dev-mode work; packaging pipeline underway
 
