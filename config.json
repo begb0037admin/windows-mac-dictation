@@ -2,7 +2,7 @@
   "sample_rate": 16000,
   "hotkey": {
     "windows": "ctrl_r",
-    "darwin": "alt_l"
+    "darwin": "mouse_middle"
   },
   "whisper": {
     "windows": {
@@ -24,5 +24,6 @@
   },
   "autostart": false,
   "theme": "dark",
-  "opacity": "glass"
+  "opacity": "solid",
+  "alwaysOnTop": true
 }
