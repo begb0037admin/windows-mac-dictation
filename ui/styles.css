@@ -439,33 +439,15 @@ body.pill-mode .app {
 }
 
 .app.state-recording .wave-bar { opacity: 0.85; }
-/* Idle is chrome/silver, not Aurora -- color is reserved for while
-   you're actually recording (JS's auroraColor() only ever runs from
-   updateAudioLevel(), which only fires while the hotkey is held). At
-   rest the bars get a metallic grey/white gradient with a brightness
-   pulse per bar (staggered via each bar's existing animation-delay) so
-   it reads as a traveling flash of light sweeping across chrome rather
-   than a colored glow. Inverted for light theme -- a light chrome
-   gradient would nearly vanish against a near-white panel, so light
-   theme uses darker charcoal/graphite tones instead. */
-.app.state-idle .wave-bar {
-  background: linear-gradient(180deg, #c8d2e0, #f5f8fc, #97a3b8);
-  animation: wave-idle 2.4s ease-in-out infinite, wave-chrome-flash 3.2s ease-in-out infinite;
-}
-
-.theme-light .app.state-idle .wave-bar {
-  background: linear-gradient(180deg, #8b95a5, #4b5563, #b0b8c4);
-}
-
-@keyframes wave-idle {
-  0%, 100% { transform: scaleY(0.5); opacity: 0.35; }
-  50% { transform: scaleY(0.8); opacity: 0.55; }
-}
-
-@keyframes wave-chrome-flash {
-  0%, 100% { filter: brightness(0.85); }
-  50% { filter: brightness(1.7); }
-}
+/* Kevin (2026-07-30): "use the active as the default in terms of size and
+   bars" - idle used to get its own separate chrome/silver CSS animation
+   here, which looked like a different, smaller component than the real
+   Aurora-coloured bars shown while recording. Idle is now driven by the
+   same paintBar()-based rendering as recording (see startIdleShimmer() in
+   app.js, wired up via updateStatus()), just fed a gentle synthetic level
+   instead of real mic RMS, so there's nothing left for CSS to do here -
+   JS sets height/opacity/background/box-shadow directly every frame for
+   both states identically. */
 
 /* ── Transcript area ── */
 

@@ -19,7 +19,7 @@ const PILL_BAR_COUNT = 24;
 let currentState = 'idle';
 let waveformBars = [];
 let pillBars = [];
-let audioLevels = new Array(FULL_BAR_COUNT).fill(0);
+let audioLevels = new Array(Math.max(FULL_BAR_COUNT, PILL_BAR_COUNT * 2)).fill(0);
 let isPillMode = false;
 
 // ── DOM references ──
@@ -74,7 +74,10 @@ function initWaveform() {
       const bar = document.createElement('span');
       bar.className = 'wave-bar';
       bar.style.setProperty('--i', i);
-      bar.style.animationDelay = `${i * -57}ms`;
+      // Stagger spans one full wave-idle cycle (1.4s) across all bars, so
+      // idle reads as one clean sweep travelling across the width instead
+      // of several overlapping ripples (54 * 26ms ~= 1.4s).
+      bar.style.animationDelay = `${i * -26}ms`;
       container.appendChild(bar);
       waveformBars.push(bar);
     }
@@ -104,13 +107,70 @@ function auroraColor(index, count, level) {
   return `hsl(${hue}, 88%, ${light}%)`;
 }
 
-function paintBar(bar, level, maxHeight, minHeight, index, count) {
+// Kevin (2026-07-30): idle should stay monochrome (black/grey/chrome), not
+// Aurora - only the *size*/rendering mechanics are shared with active, not
+// the colour. A near-zero-saturation hue with a slow per-bar brightness
+// shimmer keeps the original "traveling flash of light across chrome"
+// idle character. Light theme needs darker charcoal tones, or a light
+// chrome gradient nearly vanishes against the near-white panel background.
+// `frac` (this bar's position 0-1 across its own view) rather than a raw
+// index - see shapeLevel()'s matching comment for why.
+function chromeColor(frac, level) {
+  const isLight = document.body.classList.contains('theme-light');
+  const shimmer = 0.5 + 0.5 * Math.sin(Date.now() / 500 + frac * WAVE_PHASE_SCALE * 0.4);
+  const light = isLight
+    ? 30 + level * 15 + shimmer * 10
+    : 62 + level * 15 + shimmer * 14;
+  return `hsl(220, 6%, ${Math.max(15, Math.min(92, light))}%)`;
+}
+
+// Reference bar count all the phase formulas below are tuned against
+// (matches FULL_BAR_COUNT). The pill has far fewer bars (PILL_BAR_COUNT),
+// so indexing its wobble/shimmer phase by raw index alone made the same
+// wave-per-index frequency complete far fewer visible ripples across its
+// shorter length - it read as flatter than the full view even though it
+// was driven by the identical formula. Normalizing to *fraction across
+// this bar's own view* first, then rescaling by WAVE_PHASE_SCALE, makes
+// every view show the same wave density regardless of how many bars it has.
+const WAVE_PHASE_SCALE = FULL_BAR_COUNT;
+
+// Kevin (2026-07-30): "they need to match for idle and active, because the
+// pill is smaller we need to increase the animation" - matching wave
+// density (WAVE_PHASE_SCALE) wasn't enough on its own; the pill still read
+// as calmer purely because of its smaller physical size, so its swing is
+// amplified beyond the full view's on top of that.
+const PILL_ANIMATION_BOOST = 1.8;
+
+function paintBar(bar, level, maxHeight, minHeight, index, count, mono) {
   const height = Math.max(minHeight, level * maxHeight);
   bar.style.height = `${height}px`;
-  bar.style.opacity = Math.max(0.4, 0.4 + level * 0.6);
-  const color = auroraColor(index, count, level);
+  // Kevin (2026-07-30): opacity used to scale down to 0.4 for quiet bars,
+  // which against the light-theme container's near-white background
+  // washed the colour out toward grey/white instead of staying vivid like
+  // the reference - only height should convey level, colour should stay
+  // consistently saturated regardless of how tall any one bar is right now.
+  bar.style.opacity = 0.92;
+  const frac = index / count;
+  const color = mono ? chromeColor(frac, level) : auroraColor(index, count, level);
   bar.style.background = color;
-  bar.style.boxShadow = `0 0 ${5 + level * 12}px ${color.replace('hsl', 'hsla').replace(')', ',0.55)')}`;
+  bar.style.boxShadow = mono
+    ? `0 0 ${3 + level * 6}px rgba(255, 255, 255, 0.3)`
+    : `0 0 ${5 + level * 12}px ${color.replace('hsl', 'hsla').replace(')', ',0.55)')}`;
+}
+
+// See the "almost straight, not enough curves" comment in updateAudioLevel
+// below for why this exists - shared by both the full and pill views so
+// neither reads as a flat plateau during sustained speech. Takes `count`
+// so the wobble's wave density matches across views of different bar
+// counts - see WAVE_PHASE_SCALE above. `boost` (Kevin, 2026-07-30: "because
+// the pill is smaller we need to increase the animation") lets a
+// physically smaller view amplify its swing beyond just matching density,
+// since the same relative motion reads as far less lively at a smaller
+// physical size - the pill passes >1 here, the full view leaves it at 1.
+function shapeLevel(level, index, count, now, boost = 1) {
+  const frac = (index / count) * WAVE_PHASE_SCALE;
+  const wobble = 0.5 + 0.5 * Math.sin(now / 130 + frac * 1.7) + 0.3 * Math.sin(now / 260 + frac * 0.6);
+  return Math.max(0, Math.min(1, level * (0.3 + 0.7 * wobble) * boost));
 }
 
 /**
@@ -122,33 +182,89 @@ function updateAudioLevel(rms) {
   // of shouting. This compressive curve (boost, then a <1 power) makes
   // normal speech read as clearly visible motion while still leaving
   // headroom for genuinely loud input to look proportionally bigger.
-  const boosted = Math.pow(Math.min(1, rms * 6), 0.65);
+  // Kevin (2026-07-30): bars still weren't using the container's available
+  // height at normal speaking volume - pushed the boost/compression much
+  // further so typical speech pins close to the ceiling, not just a
+  // "visible but small" swing.
+  const boosted = Math.pow(Math.min(1, rms * 18), 0.4);
   audioLevels.shift();
   audioLevels.push(boosted);
 
+  // audioLevels is sized to the larger of the two views' needs (see its
+  // declaration above), so the full view - unlike the pill below - must
+  // read the *tail* of the buffer (the most recent samples), not index 0,
+  // or it would show stale, lagging history once the buffer is longer than
+  // waveformBars itself.
+  const fullOffset = audioLevels.length - waveformBars.length;
+  const now = Date.now();
   for (let i = 0; i < waveformBars.length; i++) {
-    paintBar(waveformBars[i], audioLevels[i], 58, 4, i, waveformBars.length);
+    const level = audioLevels[fullOffset + i];
+    paintBar(waveformBars[i], shapeLevel(level, i, waveformBars.length, now), 60, 4, i, waveformBars.length);
   }
 
+  // Kevin (2026-07-30): mini pill view was never given the same wobble
+  // shaping as the full view above, so it still read as "one straight line
+  // with minimal movement" - same treatment here, just against the pill's
+  // own bar count/index so its ripple isn't simply a cropped copy of the
+  // full view's. PILL_ANIMATION_BOOST on top of that, per Kevin's own call:
+  // "because the pill is smaller we need to increase the animation."
   for (let i = 0; i < pillBars.length; i++) {
     const level = audioLevels[i * 2] || 0;
-    paintBar(pillBars[i], level, 20, 3, i, pillBars.length);
+    paintBar(pillBars[i], shapeLevel(level, i, pillBars.length, now, PILL_ANIMATION_BOOST), 20, 3, i, pillBars.length);
   }
 }
 
 function resetWaveform() {
   audioLevels.fill(0);
-  for (const bar of waveformBars) {
-    bar.style.height = '8px';
-    bar.style.opacity = '';
-    bar.style.background = '';
-    bar.style.boxShadow = '';
+  // Bar styling itself is no longer cleared here - the idle shimmer loop
+  // (started by updateStatus whenever state becomes 'idle') immediately
+  // repaints every bar via the same paintBar() used while recording, so
+  // idle and active are the same-sized, same-coloured component instead of
+  // two different-looking ones.
+}
+
+// Kevin (2026-07-30): "use the active as the default in terms of size and
+// bars" - idle used to be a completely separate CSS animation (a small
+// grey/chrome gradient scaled via transform on an 8px base), which looked
+// like a different, smaller component than the real Aurora-coloured,
+// full-height bars shown while recording. This drives idle through the
+// exact same paintBar() rendering as updateAudioLevel() above, just fed a
+// gentle synthetic level instead of real mic RMS, so idle is literally a
+// calmer instance of the same bars, not a lookalike.
+let idleAnimFrame = null;
+
+function idleShimmerTick() {
+  const now = Date.now();
+  // Kevin (2026-07-30): "add more solid bars together" - the previous
+  // frac*0.5 spatial frequency made each "high" part of the cycle only
+  // span a couple of bars, reading as isolated peaks in a sea of thin
+  // dashes. A much slower spatial frequency (frac*0.15) spreads each
+  // high/low swing across many more consecutive bars, so a wider clump
+  // reads as solid together, travelling as one group rather than as
+  // scattered individual peaks. Raised the baseline too, so more of the
+  // cycle sits in "clearly solid" territory rather than "thin dash."
+  for (let i = 0; i < waveformBars.length; i++) {
+    const frac = (i / waveformBars.length) * WAVE_PHASE_SCALE;
+    const synthetic = 0.2 + 0.14 * Math.sin(now / 900 + frac * 0.15);
+    paintBar(waveformBars[i], shapeLevel(synthetic, i, waveformBars.length, now), 60, 4, i, waveformBars.length, true);
   }
-  for (const bar of pillBars) {
-    bar.style.height = '6px';
-    bar.style.opacity = '';
-    bar.style.background = '';
-    bar.style.boxShadow = '';
+  for (let i = 0; i < pillBars.length; i++) {
+    const frac = (i / pillBars.length) * WAVE_PHASE_SCALE;
+    const synthetic = 0.2 + 0.14 * Math.sin(now / 620 + frac * 0.15);
+    paintBar(pillBars[i], shapeLevel(synthetic, i, pillBars.length, now, PILL_ANIMATION_BOOST), 20, 3, i, pillBars.length, true);
+  }
+  idleAnimFrame = requestAnimationFrame(idleShimmerTick);
+}
+
+function startIdleShimmer() {
+  if (idleAnimFrame !== null) return;
+  idleShimmerTick();
+}
+
+function stopIdleShimmer() {
+  if (idleAnimFrame !== null) {
+    cancelAnimationFrame(idleAnimFrame);
+    idleAnimFrame = null;
   }
 }
 
@@ -181,6 +297,9 @@ function updateStatus(state, text) {
 
   if (state === 'idle') {
     resetWaveform();
+    startIdleShimmer();
+  } else {
+    stopIdleShimmer();
   }
 
   if (state === 'pasting') {
@@ -499,6 +618,7 @@ function handleBackendEvent(event) {
 function init() {
   cacheDom();
   initWaveform();
+  startIdleShimmer();
   initDrag();
 
   if (window.electronAPI && window.electronAPI.onBackendEvent) {
