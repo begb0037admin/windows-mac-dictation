@@ -68,7 +68,15 @@ def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
     audio_input = audio.reshape(-1).astype(np.float32)
 
     if _backend == "faster-whisper":
-        segments, _info = model.transcribe(audio_input, language="en")
+        # beam_size defaults to 5 (whisper's own default) - beam search
+        # explores 5x the decoding paths of greedy search per step, which is
+        # real wall-clock time on short push-to-talk clips where model-load
+        # and the fixed decode overhead already dominate. beam_size=1 (plain
+        # greedy) is the single biggest lever available without changing the
+        # model itself; accuracy cost is normally negligible for clear
+        # speech, more noticeable on ambiguous/noisy audio - worth Kevin
+        # confirming it still reads accurately in real use.
+        segments, _info = model.transcribe(audio_input, language="en", beam_size=1)
         return " ".join(segment.text.strip() for segment in segments).strip()
 
     if _backend == "mlx-whisper":
