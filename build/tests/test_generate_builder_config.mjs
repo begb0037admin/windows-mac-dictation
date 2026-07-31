@@ -13,6 +13,20 @@ const GENERATOR = path.join(BUILD_DIR, 'generate-builder-config.js');
 function freshRepo() {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'p2t-repo-'));
   fs.mkdirSync(path.join(repoRoot, 'ui'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'electron'), { recursive: true });
+  // generate-builder-config.js reads electron/package.json's version field
+  // for build-info.json (shipped inside the app so it can report its own
+  // version at runtime) - a real repo always has this file already.
+  fs.writeFileSync(path.join(repoRoot, 'electron', 'package.json'), JSON.stringify({ version: '0.1.0' }));
+  // A real git commit, not just a directory - generate-builder-config.js
+  // runs `git rev-parse HEAD` for build-info.json/meta.json's gitSha, which
+  // returns empty outside an actual repo, silently masking the field in a
+  // fixture that was never really a git repo.
+  spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot });
+  spawnSync('git', ['add', '-A'], { cwd: repoRoot });
+  spawnSync('git', ['commit', '--quiet', '-m', 'init'], { cwd: repoRoot });
   return repoRoot;
 }
 
@@ -124,6 +138,35 @@ test('generated Windows config fixes architecture, icons, and shortcuts', () => 
   assert.deepEqual(config.win.target, [{ target: 'nsis', arch: ['x64'] }]);
   assert.match(config.win.icon, /icon\.ico$/);
   assert.equal(config.nsis.shortcutName, 'Push 2 Talk');
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('packaged app ships a build-info.json extraResource with version/commit/build-time', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-8';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+
+  const buildInfoResource = config.extraResources.find((r) => r.to === 'build-info.json');
+  assert.ok(buildInfoResource, 'must ship a build-info.json extraResource so main.js can read it via process.resourcesPath');
+  assert.ok(fs.existsSync(buildInfoResource.from), 'the referenced build-info.json must actually exist on disk');
+
+  const buildInfo = JSON.parse(fs.readFileSync(buildInfoResource.from, 'utf8'));
+  assert.equal(buildInfo.version, '0.1.0');
+  assert.equal(buildInfo.runId, runId);
+  assert.equal(buildInfo.platform, 'win');
+  assert.equal(buildInfo.arch, 'x64');
+  assert.match(buildInfo.gitSha, /^[0-9a-f]{8}$/, 'gitSha should be an 8-char short hash');
+  assert.equal(typeof buildInfo.gitDirty, 'boolean');
+  assert.ok(!Number.isNaN(Date.parse(buildInfo.builtAt)), 'builtAt should be a valid ISO timestamp');
+
+  const metaPath = path.join(path.dirname(output), 'electron-builder.meta.json');
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  assert.ok(meta.gitSha.startsWith(buildInfo.gitSha), 'build-info.json\'s short sha should be a prefix of meta.json\'s full sha');
+
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 

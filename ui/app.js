@@ -54,6 +54,7 @@ function cacheDom() {
     settingCleanupModel: document.getElementById('settingCleanupModel'),
     settingAutostart: document.getElementById('settingAutostart'),
     settingAlwaysOnTop: document.getElementById('settingAlwaysOnTop'),
+    buildInfo: document.getElementById('buildInfo'),
     // App error panel (SS14)
     appError: document.getElementById('appError'),
     appErrorCode: document.getElementById('appErrorCode'),
@@ -350,6 +351,19 @@ function handleAppError(payload) {
   if (isFatal && isPillMode) disablePillMode();
 }
 
+// Sent once by main.js after the UI loads (electron/main.js's
+// resolveBuildInfo()) - a plain, always-visible line in Settings rather
+// than something you have to know to go looking for, since juggling
+// several hand-built installers was the actual problem this solves.
+function handleAppVersion(info) {
+  if (!dom.buildInfo || !info) return;
+  const shaLabel = info.gitDirty ? `${info.gitSha}+dirty` : info.gitSha;
+  const dateLabel = info.builtAt
+    ? new Date(info.builtAt).toLocaleString()
+    : 'dev build';
+  dom.buildInfo.textContent = `v${info.version} · ${shaLabel} · ${dateLabel}`;
+}
+
 function dismissAppError() {
   if (!dom.appError) return;
   if (dom.appError.classList.contains('severity-fatal')) return; // non-dismissible
@@ -626,6 +640,9 @@ function init() {
   }
   if (window.electronAPI && window.electronAPI.onAppError) {
     window.electronAPI.onAppError(handleAppError);
+  }
+  if (window.electronAPI && window.electronAPI.onAppVersion) {
+    window.electronAPI.onAppVersion(handleAppVersion);
   }
   if (dom.appErrorDismiss) {
     dom.appErrorDismiss.addEventListener('click', dismissAppError);

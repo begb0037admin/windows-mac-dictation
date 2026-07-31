@@ -632,6 +632,16 @@ select.field optgroup {
   font-weight: 700;
 }
 
+.build-info {
+  margin-top: 4px;
+  padding: 0 2px;
+  font-size: 10px;
+  color: var(--ink-muted);
+  text-align: center;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .switch-row span {
   color: var(--ink-muted);
   font-size: 10px;

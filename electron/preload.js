@@ -23,4 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAppError: (callback) => {
     ipcRenderer.on('app-error', (_event, data) => callback(data));
   },
+  // Sent once by main.js after the UI finishes loading - see
+  // resolveBuildInfo() there for what's in it (version/gitSha/builtAt/...).
+  onAppVersion: (callback) => {
+    ipcRenderer.on('app-version', (_event, data) => callback(data));
+  },
 });

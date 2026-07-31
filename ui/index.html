@@ -167,6 +167,11 @@
             </div>
             <button class="switch on" id="settingAlwaysOnTop" type="button" aria-label="Toggle always on top" aria-pressed="true"></button>
           </div>
+
+          <!-- Build info: which installer/build is actually running -
+               populated by app.js from main.js's 'app-version' event, see
+               electron/main.js's resolveBuildInfo(). -->
+          <div class="build-info" id="buildInfo"></div>
         </div>
       </div>
 

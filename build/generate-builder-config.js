@@ -99,6 +99,30 @@ function main() {
 
   const includeHook = args['include-uninstall-hook'] === 'true';
 
+  // Computed early (not just before meta.json below) so the same values
+  // feed both electron-builder.meta.json (build-machine-only record) and
+  // build-info.json (shipped inside the packaged app itself, read by
+  // electron/main.js at runtime) - Kevin asked for the running app to be
+  // able to say which build it actually is, since juggling several
+  // installers by hand was getting confusing.
+  const gitSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
+  const gitDirty = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim() !== '';
+  const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'electron', 'package.json'), 'utf8')).version;
+  const builtAt = new Date().toISOString();
+
+  const buildInfo = {
+    version: packageVersion,
+    gitSha: gitSha.slice(0, 8),
+    gitDirty,
+    runId,
+    platform: args.platform,
+    arch: args.arch,
+    builtAt,
+  };
+  const buildInfoPath = path.join(runRootReal, 'generated', 'build-info.json');
+  fs.mkdirSync(path.dirname(buildInfoPath), { recursive: true });
+  fs.writeFileSync(buildInfoPath, JSON.stringify(buildInfo, null, 2), 'utf8');
+
   // Steps 3-6: build the config object.
   const config = {
     appId: 'com.lelitte.push2talk',
@@ -122,6 +146,10 @@ function main() {
       // the API does - it decodes actual image files), so the packaged
       // app must ship icon.ico as a real resource and load it directly.
       { from: path.join(repoRoot, 'electron', 'build'), to: 'icons', filter: ['icon.ico'] },
+      // Ships the build-info.json written above so the running app can
+      // read its own version/commit/build-time via process.resourcesPath -
+      // see electron/main.js's resolveBuildInfo().
+      { from: buildInfoPath, to: 'build-info.json' },
     ],
     win: {
       target: args.platform === 'win' ? [{ target: 'nsis', arch: [args.arch] }] : undefined,
@@ -184,8 +212,7 @@ function main() {
   fs.renameSync(tmpConfigPath, args.output);
 
   // Step 11: write electron-builder.meta.json through the same temp-and-rename procedure.
-  const gitSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
-  const gitDirty = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim() !== '';
+  // gitSha/gitDirty computed once above, alongside build-info.json.
   const meta = {
     runId,
     platform: args.platform,
@@ -196,7 +223,7 @@ function main() {
     backendSource,
     outputDir,
     includeUninstallHook: includeHook,
-    generatedAt: new Date().toISOString(),
+    generatedAt: builtAt,
   };
   const metaPath = path.join(outDir, 'electron-builder.meta.json');
   const tmpMetaPath = `${metaPath}.tmp-${process.pid}`;
