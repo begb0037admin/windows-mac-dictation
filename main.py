@@ -30,6 +30,7 @@ keystroke silently does nothing.
 
 import ctypes
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -464,6 +465,22 @@ def stop_recording():
         f"[rec] recording stopped — {len(audio)} samples, "
         f"{duration_s:.2f}s captured at {SAMPLE_RATE}Hz"
     )
+
+    # Debug-only: dump the raw captured audio to a WAV file for offline
+    # beam_size speed/accuracy comparison (build/compare-beam-size.py) -
+    # never active unless P2T_SAVE_LAST_AUDIO is explicitly set, so it has
+    # zero effect on normal/packaged runs.
+    save_path = os.environ.get("P2T_SAVE_LAST_AUDIO")
+    if save_path:
+        import wave
+
+        pcm16 = np.clip(audio * 32767, -32768, 32767).astype(np.int16)
+        with wave.open(save_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(pcm16.tobytes())
+        print(f"[debug] saved captured audio to {save_path}")
 
     push_status("transcribing", "Transcribing...")
     try:
