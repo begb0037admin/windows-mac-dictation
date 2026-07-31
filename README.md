@@ -1,80 +1,89 @@
-# Dictation
+# Push 2 Talk
 
 Personal, system-wide voice dictation assistant for **Windows and Mac** — like Wispr or Eloquent, built from scratch with open components.
 
-Hold a hotkey, speak naturally (ums, false starts, self-corrections included), release — a live caption appears, then clean, polished text is shown for a quick review before being pasted into whatever text box has focus: Teams chat, browser, email, anywhere. One codebase, same behaviour on both machines.
+Hold a hotkey, speak naturally (ums, false starts, self-corrections included), release — the cleaned-up text pastes automatically wherever the cursor was when you started, no confirm step. One codebase, same behaviour on both machines.
 
-**Primary use case:** quick Teams messages and short chat-box text. Optimised for low latency and reliability over raw transcription accuracy. Target round-trip: under ~3 seconds for a short sentence.
+**Primary use case:** quick Teams messages and short chat-box text. Optimised for low latency and reliability over raw transcription accuracy.
 
 > **File transcription** (uploaded audio/video files) is handled by [`meeting-transcriber`](https://github.com/begb0037admin/meeting-transcriber), not this tool. This tool is focused exclusively on live push-to-talk dictation.
 
 ## How it works
 
-1. App runs as a normal, always-visible desktop window (pywebview)
+1. App runs as a small, always-on-top window (or minimized to the system tray)
 2. Place cursor in any text box
-3. Hold the global hotkey (push-to-talk); mic records while held
-4. A live partial transcript updates in the app window while you speak
-5. Release — audio is transcribed locally, then cleaned up by a local LLM (Ollama): filler words stripped, grammar fixed, meaning and tone preserved
-6. The cleaned text appears in the app's transcript area for review — edit it if needed, then press **Enter**/**Send** to paste it at the cursor, or **Esc**/**Dismiss** to discard it
-
-> **Status note (2026-07-26):** step 6's review-and-confirm behaviour, plus a compact Pill/mini-bar window mode, replaced the previous "paste automatically on release" flow today and has not been tested on either platform yet. See `HANDOVER.md` and `ARCHITECTURE.md`.
+3. Hold the hotkey — keyboard modifier or mouse button — while you speak; mic records while held
+4. Release — audio is transcribed locally, then cleaned up by a local LLM (Ollama): filler words stripped, grammar fixed, meaning and tone preserved
+5. The cleaned text pastes automatically at the cursor — no review/confirm step, no window to click into
 
 ## Architecture
 
+Electron shell (window, tray, hotkey UI) spawning a Python backend (audio, transcription, cleanup, paste) as a child process, talking over stdin/stdout — one JSON object per line. See `ARCHITECTURE.md` for the full data flow.
+
 | Component | Windows | Mac (Apple Silicon) |
 |---|---|---|
-| Language | Python (shared codebase) | Python (shared codebase) |
-| UI | `pywebview` — native window rendering web UI | `pywebview` — native window rendering web UI |
-| Hotkey capture | `pynput` — Right Ctrl by default | `pynput` — Left Option by default |
+| Shell / UI | Electron (frameless, always-on-top, system tray) | Electron (frameless, borderless) |
+| Backend | Python, spawned by Electron (PyInstaller-frozen when packaged) | Python, spawned by Electron |
+| Hotkey capture | `pynput` — keyboard (Right Ctrl default) or mouse button (middle-click / side buttons) | `pynput` — keyboard (Left Option default) or mouse button |
 | Audio capture | `sounddevice` (in-memory numpy) | `sounddevice` (in-memory numpy) |
 | Speech-to-text | `faster-whisper`, `small` model, CUDA + fp16 (RTX 3070) | `mlx-whisper`, `small` model, Metal-accelerated |
-| Text cleanup | Ollama local REST API (`llama3.2:3b` / `gemma2:2b`) | Same — Ollama auto-accelerates via Metal |
-| Text injection | Clipboard + simulated `Ctrl+V` (`pyperclip` + `pyautogui`) | Clipboard + simulated `Cmd+V` (`pyperclip` + `pyautogui`) |
-| Config | `config.json` — platform-keyed hotkey/whisper sections, shared cleanup/sample-rate/theme/opacity settings | same file |
+| Text cleanup | Ollama local REST API (`llama3.2:3b`) | Same — Ollama auto-accelerates via Metal |
+| Text injection | Clipboard + simulated `Ctrl+V` | Clipboard + simulated `Cmd+V` |
+| Config | `config.json` (dev) / `%APPDATA%\push2talk\config.json` (packaged) — platform-keyed hotkey/whisper sections | same shape, macOS user data dir |
 
-Local-first: free, private, no API keys. This table is a quick-reference summary — see `ARCHITECTURE.md` for the full state machine, threading model, and data flow, and `docs/BUILD_BRIEF.md` for the build history and rationale behind each decision.
+Local-first: free, private, no API keys. See `ARCHITECTURE.md` for the full state machine/threading model and `docs/BUILD_BRIEF.md` for build history and rationale.
 
-## Status
+## Status (2026-07-31)
 
-- [x] **Step 1** — Push-to-talk hotkey (Right Ctrl / Left Option) triggers recording start/stop; audio captured to memory. Cross-platform via `pynput`. **Confirmed working on both platforms.**
-- [x] **Step 2** — Transcribe: `faster-whisper` + CUDA on Windows, `mlx-whisper` on Mac. **Confirmed working on both platforms.**
-- [x] **Step 3** — Clean up the transcript via a local Ollama model (`llama3.2:3b`), strips fillers/fixes grammar while preserving meaning. **Confirmed working on both platforms.**
-- [x] **Step 4** — Paste cleaned text at cursor via clipboard (`pyperclip` + `pyautogui`, `Ctrl+V` / `Cmd+V`); original clipboard contents restored afterward. **Confirmed working on both platforms.**
-- [x] **Live captions** — Live-updating partial transcript shown in the app window while recording (chunk-and-finalize so earlier words never disappear). **Confirmed working.**
-- [x] **Web UI rework** — Replaced tkinter with pywebview. Dark-themed web UI with animated waveform, live transcript, status cells, and settings panel. **Confirmed working (2026-07-25).**
-- [ ] **Compact review UI, Pill mode, frameless/vibrancy window** — editable transcript with Enter-to-send/Esc-to-dismiss (replaces auto-paste-on-release), a compact Pill/mini-bar window mode, a frameless transparent window with macOS Vibrancy, and a corrected Mac hotkey default. Built 2026-07-26, **not yet tested on either platform**.
-- [ ] Step 5 — Run on login (optional toggle)
-- [ ] Packaging/installer for colleagues — deferred; needs GPU-fallback + Ollama-distribution decisions first
+- **Windows: done, packaged, and in daily use.** NSIS installer (Electron + PyInstaller-frozen backend), always-on-top with a Settings toggle, minimize-to-tray (closing the window hides it; fully quit via the tray icon's Exit), keyboard or mouse-button hotkey, run-on-login. The Settings panel shows exactly which build is installed (version, short commit, build time) — see `HANDOVER.md` for the session-by-session build history if you need to compare or roll back to an earlier installer (every past build's `.exe` is still kept under `build/out/`).
+- **Mac: dev mode confirmed working** (hotkey, waveform, paste, borderless window) on real Apple Silicon. **Packaging is blocked**: the packaged `.app` fails its own Accessibility/Input Monitoring permission check on launch even after granting both permissions — root cause still under investigation. See `HANDOVER.md`'s 2026-07-30 entries for the full trail.
+- Transcription tuned for speed (`beam_size=2`, a deliberate middle ground between the default's accuracy and greedy decoding's speed).
 
-### Running
+### Running (dev mode)
 
 ```
 pip install -r requirements.txt
-python main.py
+cd electron && npm install
 ```
 
-A dark-themed app window opens showing status, a live waveform, and a transcript area. Click into any other text box (Teams, Notepad, a browser), hold the hotkey (**Right Ctrl** on Windows, **Left Option** on Mac by default), speak, release — review the cleaned-up text, then press Enter/Send to paste it at your cursor there, or Esc/Dismiss to discard it. Close the window (in-app close button) to quit.
+Two processes: `python main.py` runs the backend standalone (useful for isolated debugging), but normal dev use is `npm start` from `electron/`, which spawns the Python backend itself and opens the real app window.
 
 **Windows:** global hotkey hooking usually requires running the terminal **as Administrator**. If the mic can't be opened, check Settings → Privacy & security → Microphone and allow desktop apps.
 
 **Mac:** grant **Accessibility** permission to Terminal (or your Python interpreter) under System Settings → Privacy & Security → Accessibility — without it, `pynput` silently receives no key events at all. If the mic can't be opened, grant Microphone access in the same Privacy & Security pane.
 
-Hotkey (per platform), sample rate, and whisper backend are all configurable in `config.json`. Hotkey, theme, and window opacity can also be changed from the in-app Settings panel (hotkey changes need an app restart to take effect).
+Hotkey (per platform), theme, window opacity, and always-on-top can all be changed from the in-app Settings panel (hotkey changes need an app restart to take effect).
+
+### Building a Windows installer
+
+```
+.\build\build-app.ps1
+```
+
+Produces a fresh NSIS installer under `build\out\<run-id>\electron\Push 2 Talk Setup 0.1.0.exe`. See `build/build-app.ps1`'s own comments and `HANDOVER.md` for known pitfalls (e.g. never background it with PowerShell's `*>&1` stream redirection — use `Start-Transcript` instead, see the 2026-07-29 session entry).
 
 ## Repo structure
 
 ```
-main.py           # pywebview app window, hotkey listener, audio capture, live partial transcript
-ui/
-  index.html      # web UI (dictation view, Pill/mini-bar view, settings view)
-  styles.css      # dark/light theme styling
-  app.js          # frontend state machine, waveform, Python bridge
+main.py           # backend entry point: hotkey listener, audio capture, pipeline orchestration
+transcribe.py      # faster-whisper / mlx-whisper wrapper
+cleanup.py          # Ollama call + de-um-ify/grammar prompt
+inject.py            # clipboard + paste simulation
 config.py         # loads config.json / defaults, resolves platform-keyed sections
 config.json
 requirements.txt
-transcribe.py     # faster-whisper / mlx-whisper wrapper
-cleanup.py        # Ollama call + de-um-ify/grammar prompt
-inject.py         # clipboard + paste simulation
+electron/
+  main.js         # window/tray/lifecycle, spawns and talks to the Python backend over stdio
+  preload.js      # contextBridge API exposed to the renderer
+  package.json
+ui/
+  index.html      # dictation view, Pill/mini-bar view, settings view
+  styles.css      # dark/light theme styling
+  app.js          # frontend state machine, waveform, Electron bridge
+build/
+  build-app.ps1   # Windows packaging pipeline (PyInstaller + electron-builder)
+  build-app.sh    # Mac packaging pipeline (unverified end-to-end - see Status above)
+  generate-builder-config.js  # per-run electron-builder config generator
 docs/BUILD_BRIEF.md
 ARCHITECTURE.md   # current-state component/threading/state-machine reference
 CLAUDE.md / AGENT_MODEL.md / CONSTITUTION.md / HANDOVER.md   # governance stack
