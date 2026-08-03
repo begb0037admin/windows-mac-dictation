@@ -1,7 +1,7 @@
 # CONSTITUTION.md
 # The Operating Constitution
 
-Version : 2.2
+Version : 2.3
 Status  : Published — amended 2026-08-03
 Ratified: 2026-06-06
 Author  : Kevin Lelitte, HR Systems, University of Oxford
@@ -267,6 +267,22 @@ without being asked.
    polling loop, or an event-stream watcher — rather than moving on
    and trusting the work to report itself later.
 
+1a. **For a bounded, known-duration dispatch (e.g. a Codex call
+    with a normal 10-15 minute range), the monitor must be a
+    genuine foreground blocking wait within the same turn, not a
+    background watcher followed by ending the turn.** Confirmed
+    root cause, 2026-08-03: this environment has no mechanism that
+    autonomously starts a new turn when a background task
+    completes. A background watcher's completion notification is
+    real, but it only becomes visible the next time the dispatching
+    role is already active for some unrelated reason — which can
+    leave a genuinely finished result sitting unseen for however
+    long it takes for something else to bring the role back.
+    Backgrounding is only safe when something else is already
+    guaranteed to bring the role back promptly regardless of this
+    task (e.g. the human's own next message) — never as the sole
+    plan for noticing completion.
+
 2. The dispatching role reports the real outcome — success,
    failure, or a genuine intermediate checkpoint — the moment it is
    detected, without waiting to be asked.
@@ -336,3 +352,19 @@ don't know yet, checking now."
 |         |            | hours of Kevin's time waiting on a  |
 |         |            | status that was never verified.     |
 |         |            | Decision: Kevin Lelitte 2026-08-03. |
+| 2.3     | 2026-08-03 | Section 12 refined — added 1a       |
+|         |            | (foreground blocking wait for       |
+|         |            | bounded dispatches). Rationale: the |
+|         |            | dispatching agent had attached a    |
+|         |            | real background watcher both times, |
+|         |            | but ended its turn immediately      |
+|         |            | after — this environment has no     |
+|         |            | mechanism to autonomously resume a  |
+|         |            | role when background work finishes, |
+|         |            | so a completed result can sit       |
+|         |            | unseen until something unrelated    |
+|         |            | brings the role back. Confirmed via |
+|         |            | the agent's own live retrospective, |
+|         |            | including a real-time demonstration |
+|         |            | of the gap. Decision: Kevin Lelitte |
+|         |            | 2026-08-03.                         |
