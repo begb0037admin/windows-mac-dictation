@@ -435,6 +435,62 @@ def start_recording():
     ).start()
 
 
+# ── Cleanup sanity check ──
+#
+# Guards against the cleanup LLM (a small local model, run with an explicit
+# anti-answer system prompt in cleanup.py) answering the transcript instead
+# of editing it — a failure mode already hit and partly fixed once before
+# (commit da68be3, 2026-07-09: "model was answering the transcript instead
+# of editing it"). Prompt wording alone isn't a guarantee with a 3B model,
+# and there's no review step to catch a bad result before paste_text() fires
+# (deliberately removed 2026-07-27, commit c57733a — "we want instant
+# paste"). This is a deterministic backstop that doesn't depend on the model
+# actually following instructions: cleanup only ever strips filler
+# words/false starts, so a result that's much longer than the input, or
+# that adds list/heading structure the input never had, did not come from
+# editing what was said — it's the model generating new content, and gets
+# rejected in favour of the raw transcript.
+
+def _looks_like_list_item(line: str) -> bool:
+    if not line:
+        return False
+    if line[0] in "-*•":
+        return True
+    i = 0
+    while i < len(line) and line[i].isdigit():
+        i += 1
+    return 0 < i < len(line) and line[i] in ".)"
+
+
+def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
+    raw_stripped = raw.strip()
+    cleaned_stripped = cleaned.strip()
+    if not raw_stripped or not cleaned_stripped:
+        return True
+
+    # Cleanup removes content (filler words, false starts) — it never
+    # legitimately adds enough to make the result much longer than the
+    # input. The "+30" keeps short transcripts from tripping this on
+    # ordinary punctuation/expansion noise.
+    max_plausible_len = max(len(raw_stripped) * 1.5, len(raw_stripped) + 30)
+    if len(cleaned_stripped) > max_plausible_len:
+        return False
+
+    # A single spoken sentence never legitimately turns into a bulleted or
+    # numbered list — that structure is a signature of generated content,
+    # not an edited transcript.
+    if "\n" not in raw_stripped:
+        list_like_lines = sum(
+            1
+            for line in cleaned_stripped.splitlines()
+            if _looks_like_list_item(line.strip())
+        )
+        if list_like_lines >= 2:
+            return False
+
+    return True
+
+
 def stop_recording():
     global recording, stream
     with state_lock:
@@ -501,6 +557,14 @@ def stop_recording():
         print(f"[cleanup] failed: {exc}", file=sys.stderr)
         print("[cleanup] falling back to the raw transcript for injection")
         cleaned = text
+    else:
+        if not is_plausible_cleanup(text, cleaned):
+            print(
+                f"[cleanup] rejected implausible result (looks like an answer, "
+                f"not an edit) — falling back to the raw transcript: {cleaned!r}",
+                file=sys.stderr,
+            )
+            cleaned = text
 
     push_final_text(cleaned)
     paste_text(cleaned)
