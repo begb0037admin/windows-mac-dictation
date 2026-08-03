@@ -60,6 +60,35 @@ function appendLog(prefix, text) {
   }
 }
 
+// ---------- build info (Kevin, 2026-07-31: too many installers built by
+// hand to keep track of which one is actually running - the app should be
+// able to say for itself) ----------
+
+function resolveBuildInfo() {
+  if (app.isPackaged) {
+    const infoPath = path.join(process.resourcesPath, 'build-info.json');
+    try {
+      return JSON.parse(fs.readFileSync(infoPath, 'utf8'));
+    } catch (e) {
+      // Should never happen (generate-builder-config.js always ships this
+      // file) - fail soft rather than block the app over a version label.
+      return { version: app.getVersion(), gitSha: 'unknown', gitDirty: null, runId: 'unknown', builtAt: null };
+    }
+  }
+  // Dev mode (`npm start`): no build-info.json exists (nothing ran
+  // generate-builder-config.js), so ask git directly for the same info a
+  // real build would have baked in.
+  const sha = spawnSync('git', ['rev-parse', '--short=8', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const dirty = spawnSync('git', ['status', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  return {
+    version: app.getVersion(),
+    gitSha: sha.status === 0 ? sha.stdout.trim() || 'unknown' : 'unknown',
+    gitDirty: dirty.status === 0 ? dirty.stdout.trim() !== '' : null,
+    runId: 'dev',
+    builtAt: null,
+  };
+}
+
 // ---------- backend command resolution (dev vs packaged) ----------
 
 function resolveBackendCommand() {
@@ -524,6 +553,9 @@ function createWindow() {
     fatalNative('UI_LOAD_FAILED', 'The application UI failed to load.', {
       error_class: `ELECTRON_${errorCode}`,
     });
+  });
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.send('app-version', resolveBuildInfo());
   });
   win.loadFile(indexPath);
 

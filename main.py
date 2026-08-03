@@ -32,6 +32,7 @@ import ctypes
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -532,6 +533,95 @@ def start_recording():
         )
 
 
+# ── Cleanup sanity check ──
+#
+# Guards against the cleanup LLM (a small local model, run with an explicit
+# anti-answer system prompt in cleanup.py) answering the transcript instead
+# of editing it — a failure mode already hit and partly fixed once before
+# (commit da68be3, 2026-07-09: "model was answering the transcript instead
+# of editing it"). Prompt wording alone isn't a guarantee with a 3B model,
+# and there's no review step to catch a bad result before paste_text() fires
+# (deliberately removed 2026-07-27, commit c57733a — "we want instant
+# paste"). This is a deterministic backstop that doesn't depend on the model
+# actually following instructions: cleanup only ever strips filler
+# words/false starts, so a result that's much longer than the input, or
+# that adds list/heading structure the input never had, did not come from
+# editing what was said — it's the model generating new content, and gets
+# rejected in favour of the raw transcript.
+
+def _looks_like_list_item(line: str) -> bool:
+    if not line:
+        return False
+    if line[0] in "-*•":
+        return True
+    i = 0
+    while i < len(line) and line[i].isdigit():
+        i += 1
+    return 0 < i < len(line) and line[i] in ".)"
+
+
+_WORD_RE = re.compile(r"[a-zA-Z0-9']+")
+_FILLER_WORDS = {"um", "umm", "uh", "uhh", "erm", "ah", "like"}
+
+
+def _content_words(text: str) -> set:
+    return {w.lower() for w in _WORD_RE.findall(text)}
+
+
+# Below this ratio, the cleaned result is treated as unrelated to what was
+# actually said rather than an edit of it. Low enough that legitimate
+# self-correction cleanup (which can legitimately drop an entire
+# superseded word/clause, e.g. "call John no wait call Mike" -> "Call
+# Mike.", observed ratio 0.4) still passes, while every fabricated-answer
+# case tried (observed ratio 0.0-0.25) does not.
+_MIN_VOCAB_OVERLAP = 0.35
+
+
+def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
+    raw_stripped = raw.strip()
+    cleaned_stripped = cleaned.strip()
+    if not raw_stripped or not cleaned_stripped:
+        return True
+
+    # Cleanup removes content (filler words, false starts) — it never
+    # legitimately adds enough to make the result much longer than the
+    # input. The "+30" keeps short transcripts from tripping this on
+    # ordinary punctuation/expansion noise.
+    max_plausible_len = max(len(raw_stripped) * 1.5, len(raw_stripped) + 30)
+    if len(cleaned_stripped) > max_plausible_len:
+        return False
+
+    # A single spoken sentence never legitimately turns into a bulleted or
+    # numbered list — that structure is a signature of generated content,
+    # not an edited transcript.
+    if "\n" not in raw_stripped:
+        list_like_lines = sum(
+            1
+            for line in cleaned_stripped.splitlines()
+            if _looks_like_list_item(line.strip())
+        )
+        if list_like_lines >= 2:
+            return False
+
+    # Neither check above catches a short, plainly-worded fabricated
+    # answer -- e.g. "what is your name" -> "I don't have a personal
+    # name." is about the same length as the question and a single
+    # sentence, so it slips past both. Catch this class by vocabulary:
+    # cleanup only ever edits or removes words that were actually said,
+    # it never substitutes different ones, so the cleaned result should
+    # share most of the raw transcript's words. A result sharing very
+    # little vocabulary with the raw transcript is an answer to it, not
+    # an edit of it, regardless of length or shape.
+    raw_words = _content_words(raw_stripped) - _FILLER_WORDS
+    if raw_words:
+        cleaned_words = _content_words(cleaned_stripped)
+        overlap_ratio = len(raw_words & cleaned_words) / len(raw_words)
+        if overlap_ratio < _MIN_VOCAB_OVERLAP:
+            return False
+
+    return True
+
+
 def stop_recording():
     global recording, stream
     pipeline_started_at = time.perf_counter()
@@ -587,6 +677,22 @@ def stop_recording():
         )
         return
 
+    # Debug-only: dump the raw captured audio to a WAV file for offline
+    # beam_size speed/accuracy comparison (build/compare-beam-size.py) -
+    # never active unless P2T_SAVE_LAST_AUDIO is explicitly set, so it has
+    # zero effect on normal/packaged runs.
+    save_path = os.environ.get("P2T_SAVE_LAST_AUDIO")
+    if save_path:
+        import wave
+
+        pcm16 = np.clip(audio * 32767, -32768, 32767).astype(np.int16)
+        with wave.open(save_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(pcm16.tobytes())
+        print(f"[debug] saved captured audio to {save_path}")
+
     push_status("transcribing", "Transcribing...")
     transcription_started_at = time.perf_counter()
     try:
@@ -627,6 +733,14 @@ def stop_recording():
         print(f"[cleanup] failed: {exc}", file=sys.stderr)
         print("[cleanup] falling back to the raw transcript for injection")
         cleaned = text
+    else:
+        if not is_plausible_cleanup(text, cleaned):
+            print(
+                f"[cleanup] rejected implausible result (looks like an answer, "
+                f"not an edit) — falling back to the raw transcript: {cleaned!r}",
+                file=sys.stderr,
+            )
+            cleaned = text
 
     push_final_text(cleaned)
     log_stage_timing(

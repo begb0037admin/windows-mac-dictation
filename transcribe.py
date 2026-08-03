@@ -138,10 +138,17 @@ def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
     audio_input = audio.reshape(-1).astype(np.float32)
 
     if _backend == "faster-whisper":
+        # beam_size defaults to 2 (Kevin, 2026-07-31): beam search explores
+        # N x the decoding paths of greedy search per step, which is real
+        # wall-clock time on short push-to-talk clips where model-load and
+        # fixed decode overhead already dominate. 2 is a deliberate middle
+        # ground - most of the speed win over the whisper-default 5 without
+        # going all the way to greedy's single guess. Still configurable via
+        # whisper_config for future tuning.
         segments_iter, _info = model.transcribe(
             audio_input,
             language=whisper_config.get("language", "en"),
-            beam_size=whisper_config.get("beam_size", 5),
+            beam_size=whisper_config.get("beam_size", 2),
             condition_on_previous_text=whisper_config.get(
                 "condition_on_previous_text", False
             ),
