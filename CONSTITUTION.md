@@ -1,8 +1,8 @@
 # CONSTITUTION.md
 # The Operating Constitution
 
-Version : 2.1
-Status  : Published — amended 2026-07-02
+Version : 2.2
+Status  : Published — amended 2026-08-03
 Ratified: 2026-06-06
 Author  : Kevin Lelitte, HR Systems, University of Oxford
 
@@ -251,6 +251,50 @@ it does not enter the repository.
 
 ---
 
+## Section 12 — Proactive Monitoring and Status Reporting
+
+Any role that dispatches long-running background work — a subagent
+process, an external CLI call (e.g. a Codex session), a build or
+test pipeline, or any operation whose completion is not immediately
+observable — is responsible for actively monitoring that work to
+completion and reporting the real, directly-verified outcome
+without being asked.
+
+**The protocol is:**
+
+1. Immediately after dispatching long-running background work, the
+   dispatching role attaches an active monitor — a blocking wait, a
+   polling loop, or an event-stream watcher — rather than moving on
+   and trusting the work to report itself later.
+
+2. The dispatching role reports the real outcome — success,
+   failure, or a genuine intermediate checkpoint — the moment it is
+   detected, without waiting to be asked.
+
+3. A status report is never a restatement of what was last believed
+   to be true. Before reporting any status, the dispatching role
+   re-verifies live state directly — process liveness, file or log
+   growth, an actual completion marker — not memory of an earlier
+   check.
+
+4. "In progress" is only a valid answer if it was confirmed by a
+   live check within the same reporting cycle. It is never assumed
+   from memory of an earlier state.
+
+5. If active monitoring genuinely cannot detect completion (no
+   observable exit signal, no log, no artifact), the dispatching
+   role says so explicitly rather than defaulting to silence or to
+   an unverified guess.
+
+This principle exists because unmonitored background work costs
+real human time — waiting on a status that was never coming, or
+believing work is still in progress long after it actually
+finished. Silence during long-running work is not acceptable. A
+stale or unverified status is a worse failure than an honest "I
+don't know yet, checking now."
+
+---
+
 ## Version History
 
 | Version | Date       | Change                              |
@@ -278,3 +322,17 @@ it does not enter the repository.
 |         |            | Claude Artifacts and never          |
 |         |            | committed until production-ready.   |
 |         |            | Decision: Kevin Lelitte 2026-07-02. |
+| 2.2     | 2026-08-03 | Section 12 added — Proactive        |
+|         |            | Monitoring and Status Reporting.    |
+|         |            | Rationale: a brief-converge run's   |
+|         |            | Round 5 Codex call finished         |
+|         |            | successfully but sat unreported for |
+|         |            | over 30 minutes; the dispatching    |
+|         |            | agent gave an inaccurate "starting  |
+|         |            | now" status before the work had     |
+|         |            | actually started, and repeated      |
+|         |            | vague "in progress" answers even    |
+|         |            | when asked directly — costing real  |
+|         |            | hours of Kevin's time waiting on a  |
+|         |            | status that was never verified.     |
+|         |            | Decision: Kevin Lelitte 2026-08-03. |
