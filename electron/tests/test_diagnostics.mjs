@@ -7,6 +7,16 @@ test('structured P2T_DIAG: allowlisted keys pass through', () => {
   assert.equal(out, 'P2T_DIAG {"code":"CLEANUP_FAILED","error_class":"RuntimeError","exit_code":1}');
 });
 
+test('audio diagnostics retain levels but never content', () => {
+  const out = sanitizeStderrLine(
+    'P2T_DIAG {"code":"AUDIO_SIGNAL","rms_milli":12.3,"peak_milli":45.6,"active_percent":72.1,"transcript":"private words"}'
+  );
+  assert.equal(
+    out,
+    'P2T_DIAG {"code":"AUDIO_SIGNAL","rms_milli":12.3,"peak_milli":45.6,"active_percent":72.1}'
+  );
+});
+
 test('structured P2T_DIAG: non-allowlisted keys are dropped, never leaked', () => {
   const out = sanitizeStderrLine('P2T_DIAG {"code":"X","transcript":"secret spoken words","message":"raw exception text"}');
   assert.ok(!out.includes('secret spoken words'));

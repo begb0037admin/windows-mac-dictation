@@ -2,7 +2,281 @@
 
 > See also: `ARCHITECTURE.md` (current-state component/threading/state-machine reference), `docs/BUILD_BRIEF.md` (build history and amendment rationale), `CLAUDE.md` (bootstrap/hard rules).
 
-**Last updated:** 2026-07-30 — **Packaged Mac app installed to /Applications, but the spawned backend fails its own Accessibility/Input Monitoring preflight check even after granting both permissions.** Root cause not yet found - handed to Codex. See the session entry below for the full investigation trail so it isn't repeated.
+**Last updated:** 2026-08-03 — **Two new macOS bugs root-caused live on Kevin's Mac by Markey (voice engineering agent); a `brief-converge` run has been requested (Matthew) to build the fixes.** (1) An occasional CoreAudio realtime-thread deadline miss can leave `sd.InputStream.close()` hanging indefinitely in `stop_recording()`, with no timeout — causing exact-zero audio captures and, in the worst case, an unrecoverable multi-minute silent hang ending in a backend crash. Confirmed NOT hotkey-specific (an earlier mouse-vs-keyboard hypothesis was raised and then directly disproved via a live A/B). (2) The tray icon is genuinely invisible on macOS — `resolveTrayIconPath()` unconditionally loads `icon.ico` (Windows-only format), which decodes as a 0x0 empty image in this app's Electron 43.2.0 runtime (as does `icon.icns`, unexplained; `icon.png` decodes correctly). This makes "Exit" unreachable (Force Quit required every time) and, as a direct side effect (not a separate bug), explains the app reopening at login despite autostart being correctly unchecked — macOS's own `TALLogoutSavesState` session-restore reopens whatever was still running at shutdown, and this app can never be cleanly quit. Full evidence chain in the 2026-08-03 session entry below. **Also flagged: this repo's local working tree (this Mac) is ~1076 lines of tested-but-uncommitted work ahead of GitHub `main` (a 2026-07-30 Codex session's fixes — multiprocessing recursion, native-Quartz paste, silence-rejection guard, Large-v3-turbo upgrade — never pushed). That gap needs Kevin's review and a real commit before/alongside the next round of fixes, so there's an accurate GitHub-backed restore point.**
+
+## Session 2026-08-03 (Markey, voice engineering agent) — Audio-hang and tray-icon bugs root-caused live; brief-converge requested
+
+**Context:** picked up a live investigation (audio capture appearing to silently fail) from a prior agent pass that had already refuted Eloquent-mic-contention and confirmed the multiprocessing-recursion fix (below) was present and working, with no zombie processes. This session ran directly on Kevin's Mac (`kevins-MacBook-Pro.local`), correlating `~/Library/Application Support/push2talk/logs/backend.log` against a live `log stream` capture of CoreAudio/TCC activity around real, physical hotkey presses Kevin performed live.
+
+**Bug 1 — CoreAudio stream-teardown hang, not a hotkey-type issue.** Across one long-lived (~4h41m) backend process, 8+ consecutive real-speech recordings all completed fast but captured literal exact-zero audio (`AUDIO_SIGNAL rms_milli:0,peak_milli:0,active_percent:0`) — correctly rejected by the (locally uncommitted) silence-rejection guard rather than pasting garbage. One further press instead hung: `start_recording()` logged, then nothing — no `AUDIO_SIGNAL`, no rejection — for 2m14s, ending in a silent `BACKEND_EXIT (exit_code:null)`; Electron auto-relaunched a fresh backend ~13s later. Correlated unified-log evidence: the instant that stream opened, CoreAudio logged `HALC_ProxyIOContext::IOWorkLoop: skipping cycle due to overload` (a realtime deadline miss) three times in the first ~8s, and there is confirmed to be **no** `~AUHAL ... Selecting device 0 from destructor` line anywhere in the entire 2m14s hang window — `stop_recording()`'s `local_stream.stop()/close()` call (current `main.py` ~line 548-550) never completed. Every healthy recording today, before and after, shows a clean destructor line within ~1s of stopping and zero overload messages. A working hypothesis that this was specifically triggered by the mouse-button hotkey path (raised mid-session, given `run_hotkey_listener()`'s own comment that mouse clicks aren't suppressed/exclusive the way keyboard modifiers are) was directly tested and disproved: Kevin did 4 clean `mouse_middle` press-hold-speak-release cycles in a row on the fresh post-crash backend, all captured real audio and completed normally. **Confirmed mechanism:** an occasional CoreAudio realtime deadline miss (root trigger not fully pinned down — plausibly transient system load, not app-controllable) can leave the stream's teardown call hanging forever, because there is no timeout/watchdog around it — turning one transient CoreAudio hiccup into an indefinite silent hang with zero user feedback. Separately, definitely-real: `stop_recording()` clears `recording`/`stream` state *before* teardown actually completes, a race that could let a second press open a concurrent stream during that window.
+
+**Bug 2 — tray icon invisible on macOS, forcing Force Quit; also explains the reopens-at-login complaint.** `resolveTrayIconPath()` (`electron/main.js` ~line 401-413) unconditionally loads `icon.ico` for the tray on both platforms — no Darwin branch. Direct headless test against this app's own Electron 43.2.0 runtime today: `icon.ico` → `isEmpty:true` (0x0) on macOS; `icon.icns` (present, independently confirmed genuinely valid via `iconutil`/`sips`) → *also* `isEmpty:true`, unexplained; `icon.png` → decodes correctly, 1024x1024. `createTray()` explicitly falls back to `nativeImage.createEmpty()` when the icon is empty, so the live Tray really is blank — confirmed via a real screenshot of the running app's actual menu bar today (no icon matching this app's branding anywhere in it). Same bug class as the historical Windows tray-icon fix (`nativeImage.createFromPath` silently failing on the wrong resource type), recurring here via a mismatched format on the other platform. Since Exit only lives on that tray's context menu and the hide-to-tray-on-close design is intentional (2026-07-29, do not revert), an invisible icon makes Force Quit the only way in. This also explains "reopens at login despite autostart unchecked" as a side effect, not a second bug: confirmed via both the legacy System Events login-items list and the modern `sfltool dumpbtm` registry that this app is not registered as a login item at all (matches the correctly-unchecked config; `electron/login-item-logic.js` is working correctly, not the culprit); separately confirmed this Mac has `com.apple.loginwindow TALLogoutSavesState = 1` (macOS's own "reopen windows when logging back in" preference) — since the app can never be cleanly quit, it's always "still open" at shutdown, so macOS reopens it. Fixing the tray icon should resolve both symptoms.
+
+**Also flagged, smaller, independent:** `capture_focus_target()`/`restore_focus_target()` (`main.py` ~lines 172-210) still use `osascript`/System Events for pre-paste focus snapshot/restore (paste itself no longer needs AppleEvents — already fixed via native Quartz `CGEventPost`). The per-target-app Automation permission this needs has never actually been exercised against a real third-party app on this Mac, and both functions swallow failures via a broad `try/except` with no visible error. Not reproduced as a live bug today, but a real, verified gap.
+
+**Not done this session:** no code changes made (diagnosis only, per Kevin's explicit "don't want a handoff based on a guess" instruction — confirmed everything above live before concluding). A `brief-converge` run has been requested against Matthew for the actual fix; see his run's own paperwork once started. The pre-existing uncommitted local diff (multiprocessing/native-paste/silence-guard/Large-v3-turbo work, 2026-07-30 Codex session, described in the session entry immediately below) was read and relied upon but not modified or pushed.
+
+## Session 2026-07-30 (Codex, continued) — Mac frozen multiprocessing recursion fixed
+
+Shortly after the prior package was provisionally accepted, Kevin dictated one question once and received several repeated copies. The issue was immediately reopened; the earlier completion statement is superseded.
+
+**Direct evidence and root cause:**
+
+- At 17:27, `backend.log` recorded five `LIVE_CAPTIONS_DISABLED_LARGE_TURBO` events, five nearly identical `AUDIO_SIGNAL` records, and five separate transcription/cleanup/ready pipelines for one hotkey use. This was not one Whisper result containing an internal repetition loop.
+- Read-only process inspection showed one Electron app and its primary backend, followed by a recursive chain of frozen-backend processes launched with `-B -S -I -c from multiprocessing.resource_tracker import main;main(...)`: PID chain `86104 -> 86117 -> 86127 -> 86143 -> 86154 -> 86524`.
+- The backend's frozen entry point did not call `multiprocessing.freeze_support()`. PyInstaller documents this exact symptom: on macOS, a multiprocessing resource tracker is launched using the frozen application executable; without its `freeze_support()` diversion, the helper executes the application code and can create an endless spawn loop.
+- The Electron single-instance lock was working at its own layer but could not prevent this Python-level recursion, because all recursive pipelines were descendants of the one legitimate Electron-spawned backend.
+
+**Mac-only repair:**
+
+- Added `build/push2talk-backend.mac-entry.py`. It calls `multiprocessing.freeze_support()` before importing `main`, allowing PyInstaller to divert resource-tracker/worker invocations before any microphone, hotkey, transcription, or paste initialization.
+- Only `build/push2talk-backend.mac.spec` now uses that wrapper. Shared `main.py`, `build/push2talk-backend.win.spec`, Windows model configuration, and the installed Windows app were not changed for this repair, at Kevin's explicit request.
+- Added regression tests proving call order and proving the Windows spec still points directly to `main.py`.
+- Added a Mac build gate that launches the actual frozen executable with the exact POSIX resource-tracker command form and a real inherited tracking pipe. The helper must remain silently blocked until pipe EOF, then exit cleanly without emitting backend events. This prevents another package from passing on source-level assumptions alone.
+
+**Verification and artifact:**
+
+- 52/52 root Python tests, 25/25 Electron tests, 17/17 Python build tests, 12/12 builder-config tests, and 5/5 icon-generator tests passed: 111 tests total.
+- The new gate printed `frozen multiprocessing diversion: PASS` during the build, and passed again independently against the backend copied inside the final `.app`.
+- Real frozen Large Turbo MLX/Metal inference, backend protocol checks, package inventory, and strict deep app/backend signature checks passed.
+- Final build: `0.1.0-20260730T173251Z-1f03f3f+dirty`.
+- App identifier `com.lelitte.push2talk`; ad-hoc CDHash `d29fbbf53517fdd5800b182b1848ea16f6b7d512`.
+- DMG: `build/out/0.1.0-20260730T173251Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (393,160,910 bytes), SHA-256 `d88943f868fc922155ada5053c23d546bf22d24bf3436c900102d4aa25cc5a00`. `hdiutil verify` reports the image valid.
+- The DMG is marked `UNVERIFIED` only because the interactive renderer/physical hotkey/microphone/paste smoke step was skipped. The currently installed app remains the faulty prior build until Kevin replaces it.
+
+**Required acceptance sequence:** use the faulty app's tray menu to select **Exit** before installing; this must terminate the entire existing backend/tracker chain. Open the new DMG, replace the Applications copy, remove/re-add the new app under Accessibility and Input Monitoring for its new ad-hoc CDHash, launch once, and dictate one short sentence. After launch, process inspection should show one Electron parent, one primary backend, and at most a direct legitimate resource tracker—not a tracker-to-tracker chain or multiple dictation pipelines.
+
+## Session 2026-07-30 (Codex, continued) — Repeated invented text researched; layered safety fix built
+
+Kevin reported that one dictation returned the same invented sentence five times even though he did not say it. This was treated as a data-integrity defect, not as a pronunciation problem.
+
+**Evidence and conclusion:**
+
+- `backend.log` showed two overlapping complete dictation pipelines at 16:30:07 and three at 16:30:26. Each pipeline independently started, transcribed, cleaned, and pasted. The Electron main process had no `app.requestSingleInstanceLock()`, so launching the app more than once could create multiple backend recorders and multiple pasted results.
+- The log intentionally excludes transcript content, so it cannot prove whether the exact invented words first came from Whisper or Ollama. Do not claim that provenance without a captured raw-vs-cleaned comparison.
+- OpenAI's Whisper paper documents complete hallucinations unrelated to the audio and repetition loops. The official decoder exposes no-speech, log-probability, compression-ratio, and previous-text conditioning controls. These are relevant safeguards, but a direct local test also proved that Large Turbo can confidently transcribe one second of digital zero audio as `"Thank you."`, with metrics that do not trip the model-level thresholds. Silence therefore needs an independent signal gate before inference.
+- This remains fully local: neither transcription nor cleanup uses a paid cloud API, provider credit, or account balance.
+
+**Implemented:**
+
+- Electron now acquires `app.requestSingleInstanceLock()` before creating a window/backend. A second launch quits immediately and focuses/restores the existing primary window instead of starting another recording pipeline.
+- The production path measures RMS, peak, and active-sample fraction and rejects digital/near silence or an isolated click before Whisper. It shows `No clear speech was detected, so nothing was pasted.` and logs only content-free signal levels.
+- Both MLX Whisper and faster-whisper now use `condition_on_previous_text=False`, explicit no-speech/log-probability/compression thresholds, and segment-level validation. Obvious phrase loops, all-no-speech segments, very low mean log probability, or excessive compression are rejected and never pasted.
+- If local Ollama cleanup introduces a repetition loop that was not present in the safe raw transcript, cleanup is discarded and the raw transcript is used.
+- Rejections and timings remain privacy-safe: diagnostics contain codes, metrics, counts, and durations, never recorded audio or transcript text.
+- The frozen-build inference self-test accepts a deliberate safety rejection as proof that the MLX runtime executed, while still failing on dependency/model/runtime errors.
+
+**Verification:**
+
+- 50/50 root Python tests, 25/25 Electron tests, 12/12 Node builder-config tests, and 17/17 Python packaging tests passed: 104 automated tests total. Shell syntax and `git diff --check` also passed.
+- Final build: `0.1.0-20260730T164618Z-1f03f3f+dirty`.
+- The build gate and a second direct invocation of the exact embedded backend completed real frozen Large Turbo MLX/Metal inference. The model may still produce text for the build's synthetic zero waveform because that diagnostic deliberately invokes the model directly; the normal production path rejects that waveform before inference.
+- `app.asar` was inspected and contains `/single-instance-logic.js`.
+- The final `.app` passes `codesign --verify --deep --strict`; identifier `com.lelitte.push2talk`, ad-hoc CDHash `a53fc9793ef75f03969c667cf0d361771f4b9090`.
+- DMG: `build/out/0.1.0-20260730T164618Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (393,162,540 bytes), SHA-256 `0352080183370f1e58d1343f6de203e241e0eaa9ed762b1451b0afa38f2601ed`. `hdiutil verify` reports the image valid.
+- The package is marked `UNVERIFIED` only because the renderer/physical microphone/hotkey/paste smoke step was skipped. `/Applications/Push 2 Talk.app` was not replaced or launched during this work.
+
+**Controlled acceptance:** fully exit the old installed app from its tray before replacing it. This matters once because the old build has no single-instance lock and cannot be displaced by the new build. Install the DMG, remove/re-add the new installed copy under both Accessibility and Input Monitoring because its ad-hoc CDHash changed, launch exactly once, and dictate one clear short phrase into Notes. Then launch its icon again: the existing window should focus and no second backend should appear. If the app reports no clear speech, inspect the content-free `AUDIO_SIGNAL` diagnostic before tuning thresholds.
+
+**Superseded acceptance:** Kevin initially reported the package working, but a subsequent one-question dictation exposed five Python backend pipelines. The issue was reopened and root-caused in the following session above; do not treat this earlier acceptance as final.
+
+## Session 2026-07-30 (Codex, continued) — Large Turbo duplicate-inference latency removed
+
+After installing/testing Large V3 Turbo, Kevin confirmed accuracy improved but response after releasing the hotkey was slower.
+
+**Root cause in the implementation:**
+
+- The live-caption loop invoked Whisper every 0.8 seconds during recording.
+- The final path shared the same `transcribe_lock`. Releasing the hotkey while a Large Turbo partial pass was in flight made the final pass wait for that disposable visual-only transcription.
+- The app then transcribed the complete audio again for the authoritative result and ran Ollama cleanup serially. This meant one user dictation could pay for multiple Large Turbo passes before paste.
+
+**Implemented:**
+
+- `live_partial_transcription_enabled()` disables live partial transcription only when the active model/repository is Large V3 Turbo. Small/custom models retain the existing live-caption behavior.
+- Recording waveform/audio-level feedback remains active. Large Turbo runs once after release, through the same final model, fixed-English decoding, cleanup, and paste path as before; there is no intended accuracy change.
+- Added content-free structured diagnostics for transcription time, cleanup time, and total release-to-ready time. Each record contains only a stage code, milliseconds, and output character count; Electron's existing allowlist strips everything else.
+- Added three regression tests covering Large Turbo partial suppression, Small-model caption preservation, and the timing diagnostic's privacy-safe shape.
+
+**Verification:**
+
+- Source/build tests passed: 39/39 Python tests, 21/21 Electron tests, 17/17 Python packaging tests, plus shell syntax and `git diff --check`.
+- Final build: `0.1.0-20260730T161030Z-1f03f3f+dirty`.
+- The build gate completed real frozen Large Turbo MLX inference. The exact backend copied inside the final `.app` independently passed host-GPU inference and emitted `{"type":"build_self_test","component":"mlx_whisper","ok":true,"transcript_length":10}`.
+- DMG integrity verified by `hdiutil`. App/backend strict signature checks passed.
+- Outer app identifier: `com.lelitte.push2talk`; CDHash: `443f0ae0fd130b6b07c4d2e03f6e610e94449a7b`.
+- DMG: `build/out/0.1.0-20260730T161030Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (393,157,264 bytes), SHA-256 `a1b6fa284b1cb5ffb3e7a29a5a5a1c66063d15ec8b1b480d46f6354e45d8257e`.
+- The DMG is marked `UNVERIFIED` only because the interactive renderer/physical-input smoke step was skipped. The installed app was not modified during implementation/build. Installing this new ad-hoc build requires Accessibility and Input Monitoring to be removed/re-added for its new CDHash.
+
+**Next acceptance step:** install the replacement, regrant the two TCC permissions, and dictate several short phrases. If response is still too slow, inspect `TRANSCRIPTION_TIMING`, `CLEANUP_TIMING`, and `DICTATION_READY_TIMING` in `backend.log` before changing model precision or cleanup behavior.
+
+## Session 2026-07-30 (Codex, continued) — Large V3 Turbo accuracy upgrade implemented
+
+Kevin chose to move directly to the larger model on both Mac and Windows after the researched Mac/Windows accuracy mismatch.
+
+**Implemented:**
+
+- Mac default: `mlx-community/whisper-large-v3-turbo`, with `language="en"` explicitly supplied on every transcription.
+- Windows default: faster-whisper `large-v3-turbo`, with `language="en"` and `beam_size=5` explicitly supplied.
+- Added a narrow persisted-config migration. It upgrades only the exact previously shipped Small configurations on each platform. Any custom model/repository remains unchanged. The real current user config matches the old shipped defaults exactly and will therefore migrate on first launch of the new build.
+- Increased the frozen MLX inference timeout from 180 to 600 seconds to accommodate a clean machine's first ~1.61 GB model download.
+- Added unit coverage for both transcription call shapes, both new defaults, exact legacy migration/persistence, and custom-model preservation.
+
+**Evidence-driven correction during the build:**
+
+- The first candidate build failed its real frozen inference gate with `NotImplementedError: Beam search decoder is not yet implemented` from mlx-whisper. This proved that faster-whisper's beam setting cannot simply be copied to MLX.
+- Mac beam search was removed. MLX retains its implemented greedy/temperature-fallback decoder while still gaining the substantially larger Turbo model and fixed-English decoding. Windows retains supported 5-beam search.
+- The source suite then passed 36/36 Python tests, 21/21 Electron tests, 17/17 Python packaging tests, and `git diff --check`/shell syntax validation.
+
+**Mac artifact verification:**
+
+- Final build: `0.1.0-20260730T155039Z-1f03f3f+dirty`.
+- The build's frozen backend gate completed real `whisper-large-v3-turbo` inference through MLX/Metal.
+- The exact backend copied inside the final `.app` was independently run with host GPU access and emitted `{"type":"build_self_test","component":"mlx_whisper","ok":true,"transcript_length":10}`.
+- The final app and embedded backend pass strict signature validation. Outer identifier: `com.lelitte.push2talk`; outer CDHash: `58b40fa4dcce7e2008857f63be7e6bd8f8e76a54`.
+- DMG: `build/out/0.1.0-20260730T155039Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (393,150,219 bytes), SHA-256 `740a9885e627a580054da19d14c3aa2c01c0bf3fed097aa15c8f542776a3a44c`.
+- The DMG remains marked `UNVERIFIED` only because the interactive Electron renderer/physical-input smoke step was skipped; package structure, signatures, and real frozen model inference passed. `/Applications/Push 2 Talk.app`, its TCC permissions, and the live user config were not modified by this build.
+
+**Operational consequences:**
+
+- Installing this ad-hoc build changes the app CDHash, so Accessibility and Input Monitoring must be removed/re-added for the new installed copy.
+- The large Mac checkpoint is already cached on this development Mac as a result of the inference gate. A different Mac would download ~1.61 GB on first transcription.
+- Windows source/config is upgraded, but a new Windows installer still needs to be built and acceptance-tested on the Windows/RTX 3070 machine; no Windows binary can be produced by the Mac packaging run.
+
+## Session 2026-07-30 (Codex, continued) — Mac accuracy gap researched
+
+Kevin reports that Mac fails to recognize simple words while the Windows version is substantially more accurate. No code/config/package change was made during this research.
+
+**Concrete comparison:**
+
+- Both configured paths use Whisper Small. Mac's cached `mlx-community/whisper-small-mlx` declares the standard Small architecture (244M parameters) and has a ~459 MB `weights.npz`; it is not a tiny or 4-bit model.
+- Windows calls faster-whisper with `language="en"`. Mac calls `mlx_whisper.transcribe()` without a language, causing language detection from up to the first 30 seconds. Push-to-talk clips are often only a few seconds, making this extra classification both unnecessary and poorly informed.
+- faster-whisper's default decoding uses `beam_size=5`; mlx-whisper's `DecodingOptions` defaults `beam_size=None`, which selects its single-path greedy decoder at temperature zero. Thus the current app compares the same model family with materially different decoding effort.
+- Host is an M1 Pro with 16 GB unified memory. If aligned decoding is still insufficient, `mlx-community/whisper-large-v3-turbo` is a viable second stage: OpenAI lists Turbo at 809M parameters/~6 GB memory and describes it as the speed-optimized large-v3 variant; the current MLX checkpoint is ~1.61 GB on disk. This has a first-use download and higher memory/latency cost.
+
+**Recommended controlled sequence:**
+
+1. Set Mac final transcription to `language="en", beam_size=5`, matching Windows' key decoding choices. Keep the current Small model for the first comparison.
+2. Test the same 3–5 short phrases on both machines and distinguish the raw transcript from Ollama's cleaned result.
+3. Only if Mac remains materially worse, switch Mac to `mlx-community/whisper-large-v3-turbo` and repeat. Do not jump models before testing the known decoding mismatch.
+
+## Session 2026-07-30 (Codex, continued) — Literal `v` paste bug fixed with native Quartz flags
+
+After both TCC permissions were correctly regranted, dictation/transcription worked but the target text box received only a literal `v`, not the clipboard text.
+
+**Evidence and cause:**
+
+- TCC database now shows both Accessibility and ListenEvent allowed and bound to the installed build's CDHash `d3f79dc0...`; stale permissions are no longer the cause.
+- Installed PyAutoGUI 0.9.54 recognizes `"command"` and maps it to macOS keycode 55. Its implementation nevertheless posts Command-down and V as separate Quartz events and assumes the modifier state carries across.
+- The literal `v` is direct behavioral proof that the V event reached the target without Command. Apple documents `CGEventSetFlags` as the API for setting an event's flags and `kCGEventFlagMaskCommand` as indicating that Command is down.
+
+**Fix:**
+
+- Mac paste in `inject.py` now creates native Quartz V-down/V-up events (virtual keycode 9), explicitly applies `kCGEventFlagMaskCommand` to each with `CGEventSetFlags`, and posts them at the HID event tap. Windows retains its existing PyAutoGUI Ctrl-V path.
+- Added regression tests that assert both V events carry the Command flag and that Windows behavior is unchanged.
+
+**Verification:**
+
+- 31/31 root Python tests, 21/21 Electron tests, 21/21 Node build tests, and 17/17 Python build tests passed.
+- Fresh non-installing build `0.1.0-20260730T132148Z-1f03f3f+dirty` passed frozen real MLX Whisper inference, packaged inventory gates, and strict app/backend signature verification.
+- DMG: `build/out/0.1.0-20260730T132148Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (393,153,940 bytes), SHA-256 `0b691e917e1726d3d5447fb7a4f858b77e326954387c157e166f18261e53d241`.
+- New ad-hoc CDHash is `89343b7b9f28750b6b6af91d47c24620c2456c6b`; replacing the current installation will require removing/re-adding the app under both Accessibility and Input Monitoring again. The current installed app and permissions were not changed while implementing/building this fix.
+
+## Session 2026-07-30 (Codex, continued) — New package installed; current exit is proven stale TCC grant
+
+Kevin installed the repaired package, then reported `{"exit_code":1}`. Read-only evidence:
+
+- `/Applications/Push 2 Talk.app` is the new package: all four repaired runtime files are present and nonempty; its outer CDHash is `d3f79dc0049795cb20e101d64fed52dcf3e8453a`; strict deep signature verification passes.
+- The existing Accessibility and ListenEvent rows remain allowed (`auth_value=2`) but their `csreq` contains old CDHash `4e640d2b280027fb9d6e771532f5e3dbd61149e6`.
+- At the exact 14:00:36 BST failure, TCC attributed the spawned backend to responsible app `com.lelitte.push2talk`, then logged `Failed to match existing code requirement ... kTCCServiceListenEvent` and returned `authValue=0/authReason=5`. This exactly explains `CGPreflightListenEventAccess() == False` and `sys.exit(1)`.
+- The exact installed backend, run with the real `P2T_CONFIG_DIR` plus the build-only inference mode and host GPU access, emitted `{"type":"build_self_test","component":"mlx_whisper","ok":true,"transcript_length":0}`. Preserved user configuration matches the intended local `mlx-community/whisper-small-mlx` setup.
+
+The log also contains one transcription-error fingerprint immediately before the clean relaunch. The most likely explanation is that the prior app/backend process was still resident while Finder replaced its on-disk bundle, creating a mixed old-running-process/new-files test; its subsequent `exit_code:null` then records that old process being terminated. Treat this as an inference, not proof. The honest live test is after removing/re-adding the new app under both Accessibility and Input Monitoring, then launching fresh. No code, config, installed app, or permission state was changed during this diagnosis.
+
+**Follow-up after regrant:** dictation/transcription now works, but Command-V is silently discarded in Teams and Notes. The TCC database proves the two grants are split: `kTCCServiceListenEvent` now contains the new app CDHash `d3f79dc0...`, while `kTCCServiceAccessibility` still contains the old build CDHash `4e640d2b...`. This exactly explains the symptom: Input Monitoring admits the hotkey, but Accessibility rejects `pyautogui`'s synthetic paste keystroke without raising an exception, so the backend can log injection as sent even though macOS drops it. Required next action is remove (not merely toggle) and re-add Push 2 Talk under Accessibility only; no code change is indicated.
+
+## Session 2026-07-30 (Codex, continued) — Packaged MLX/Whisper inference repaired and proven before installation
+
+**User-visible failure:** after the TCC/signing and hotkey repairs, a real packaged-app recording reached CoreAudio successfully but the UI changed to the red error state during transcription.
+
+**Evidence and root cause:**
+
+1. This is not an API key, cloud provider, or account-credit issue. The configured transcription backend is local `mlx-whisper`; cleanup is local Ollama. The Whisper model was already cached locally.
+2. Unified logs proved the packaged app opened the DJI microphone, converted 48 kHz stereo input to 16 kHz mono, and started/stopped capture. Backend diagnostics then showed repeated partial-transcription failures and a final-transcription failure. This isolated the red state to frozen inference, not recording, permissions, cleanup, or paste.
+3. The development MLX installation contained `mlx/lib/mlx.metallib`, but the frozen backend contained only `*.dylib`. The spec introduced for the earlier `libjaccl.dylib` repair globbed only dylibs, omitting MLX's 162,449,848-byte Metal shader library.
+4. A newly added real frozen-inference gate exposed two further PyInstaller omissions that lightweight startup/`get_config` checks could never detect:
+   - `mlx._reprlib_fix`, dynamically imported by the native MLX extension and invisible to static import analysis.
+   - mlx-whisper's inference data: `mel_filters.npz`, `gpt2.tiktoken`, and `multilingual.tiktoken`.
+
+**Implemented:**
+
+- `build/push2talk-backend.mac.spec` now includes all MLX dylibs, exactly one `*.metallib`, the dynamic `mlx._reprlib_fix` import, and all three required mlx-whisper assets. The spec fails closed if the Metal library or expected assets are absent at build time.
+- `main.py` has an environment-gated build diagnostic that runs one second of synthetic silence through the real configured `transcribe()` path. It executes before microphone and TCC preflights so the result tests only the frozen MLX/Whisper/Metal runtime; normal app launches never enter it.
+- `build/build-app.sh` now requires that real frozen inference to succeed within 180 seconds before Electron packaging. It also checks all four runtime data files after both builder passes, alongside the existing code-signature checks.
+- Added three unit tests covering the inference call shape, Mac-only guard, and proof that build-self-test routing bypasses microphone/TCC checks.
+
+**Verification:**
+
+- Automated source/build tests: 29/29 root Python tests, 21/21 Electron tests, 21/21 Node build tests, and 17/17 Python build tests passed.
+- The gate correctly failed two intermediate builds—first on missing `mlx._reprlib_fix`, then on missing `mel_filters.npz`—instead of allowing another broken installer through.
+- Fresh non-installing build `0.1.0-20260730T123538Z-1f03f3f+dirty` passed real frozen MLX Whisper inference, both packaged inventory checks, and strict app/backend signature verification.
+- The exact backend embedded at `Push 2 Talk.app/Contents/Resources/backend/push2talk-backend` was then run independently with host GPU access and emitted:
+  `{"type":"build_self_test","component":"mlx_whisper","ok":true,"transcript_length":0}`.
+- DMG: `build/out/0.1.0-20260730T123538Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (393,158,047 bytes), SHA-256 `2f3b1295a7d3293696afc3c7accbce0325bb1198b280e4f9a35a6241e5c1034c`.
+
+**Boundary preserved:** `/Applications/Push 2 Talk.app`, TCC permissions, and user configuration were not changed during this repair. The DMG is marked `UNVERIFIED` only because the interactive renderer/physical-input gate was deliberately skipped to honour the agreement not to launch or install anything before frozen inference passed. Next action is to agree the installation/live-dictation test with Kevin; do not reset or change permissions before that agreement.
+
+## Session 2026-07-30 (Codex, continued) — Middle-click default/runtime Settings regression fixed
+
+**User-visible regression:** after the permission repair, middle-click returned and selecting a different hotkey appeared not to work.
+
+**Root cause:**
+
+1. Commit `edbf828` deliberately promoted a local experiment into the shipped `config.json`, changing Mac from the documented/default `alt_l` (Left Option) to `mouse_middle`.
+2. `cmd_save_config()` wrote the selected hotkey to disk but left module globals and the already-running `pynput` listener unchanged.
+3. The Settings UI immediately claimed “Settings saved.” Closing the window only hides the app to the tray, so the old listener could remain active indefinitely; a later `get_config` also returned the stale startup global. Runtime, UI, and persisted config could therefore disagree.
+
+**Implemented:**
+
+- Restored `config.json`'s shipped Mac hotkey to `alt_l`.
+- Added `describe_hotkey()` and `apply_runtime_hotkey()` in `main.py`. A changed setting is validated, the existing keyboard/mouse listener is stopped, runtime hotkey/display/idle state is updated, the correct new listener type starts immediately, and the in-memory config reflects the saved value.
+- `save_config` now emits `settings_saved` with authoritative config/display data. Failures emit `settings_error` instead of being silent.
+- Electron UI no longer shows success before backend acknowledgement; it applies the authoritative saved config and updates the main hotkey badge. The Settings hint now correctly says changes apply immediately.
+- Added three runtime-switch regression tests in `test_main_hotkey.py`.
+
+**Verification:**
+
+- Automated: 26/26 root Python tests, 21/21 Electron tests, 21/21 Node build tests, and 17/17 Python build tests passed.
+- Host-level source protocol test switched `alt_l` → `mouse_middle` → `alt_l` in one running backend. Each change emitted the new `ready`/idle state plus `settings_saved`, and the following `get_config` returned the active value. No restart/tray exit was required.
+- Verified interactive build succeeded: run `0.1.0-20260730T114958Z-1f03f3f+dirty`. Renderer gate was visually checked (UI/logo rendered, no missing-file error); the final app and embedded backend both passed strict code-signature verification.
+- Replacement DMG: `build/out/0.1.0-20260730T114958Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg`, SHA-256 `a075b0e384c9a6ed1c0858887466ea15a975a854537be4eacf5a9cf5b2c95066`.
+- A post-build direct frozen-backend command test was attempted but did not reach startup/commands: a read-only process stack sample showed macOS CoreAudio blocked inside `Pa_IsFormatSupported` while the new-CDHash microphone permission prompt from the renderer smoke run was still pending. This was not a hotkey-listener block; the speculative listener-timeout change was discarded. Installation plus physical hotkey testing remains the honest final gate.
+
+**Important installation constraint:** this is another ad-hoc-signed build with a new CDHash. Replacing the installed app will require Accessibility and Input Monitoring to be reset/re-added for this exact build, as documented below. Existing userData is preserved across install, so a prior persisted `mouse_middle` value may initially remain; the repaired selector can change it immediately to Left Option or another choice.
+
+## Session 2026-07-30 (Codex) — Packaged Mac TCC bug root-caused; explicit ad-hoc signing fix built
+
+**Root cause established from live `com.apple.TCC` logs, not inferred:**
+
+1. TCC responsibility resolution is working. For the real `child_process.spawn()` launch it recorded the backend as the accessing/requesting process and `/Applications/Push 2 Talk.app/Contents/MacOS/Push 2 Talk` as the responsible process. The loose PyInstaller binary does not need to become a separate directly-grantable TCC client, and moving it to XPC/a helper bundle is unnecessary for this bug.
+2. The original electron-builder output was not a valid signed app bundle. Although individual Mach-O files carried incidental ad-hoc signatures, electron-builder had skipped macOS application signing because no Developer ID identity existed. During the backend's `CGPreflightListenEventAccess()` request, TCC therefore fell back to the responsible executable path (`client_type=1`, `/Applications/Push 2 Talk.app/Contents/MacOS/Push 2 Talk`) and returned `authValue=1/authReason=5`. System Settings had granted the bundle client (`client_type=0`, `com.lelitte.push2talk`), so the subjects could never match.
+3. The manual re-sign experiment changed the failure rather than fixing it. The TCC row's `csreq` is `cdhash H"5c22a19a..."`; it is not identifier-only. The re-signed outer app's CDHash became `376e40f0...`, and TCC logged `SecStaticCodeCheckValidity ... status -67050` plus both hashes. Also, signing the backend *after* the outer bundle invalidated the outer resource seal (`codesign --verify --deep --strict`: `file modified: .../backend/push2talk-backend`). The surviving `auth_value=2` row was therefore stale, not proof that the new code still matched its grant.
+4. Developer ID / Team ID is not required for TCC responsibility attribution or for one fixed build to work after permission is granted. It is required for a stable designated requirement across changed versions. Apple documents that an ad-hoc signature identifies exactly one program; its designated requirement is CDHash-based, so any rebuilt/changed app needs Accessibility/Input Monitoring toggled off/on. A Developer-ID-signed release is the route to grants surviving updates.
+
+**Implemented:**
+
+- `build/generate-builder-config.js`: Mac config now explicitly sets electron-builder `identity: "-"`, `hardenedRuntime: false`, and `forceCodeSigning: true`. The installed electron-builder 26.15.3 documents `"-"` as its supported opt-in ad-hoc path; its bundled `@electron/osx-sign` walks every Mach-O under `Contents`, including the backend under `Contents/Resources`, signs children first, then seals the outer app.
+- `build/build-app.sh`: added `assert_mac_signature()`. Both the `--dir` and DMG builder passes must now satisfy `codesign --verify --deep --strict`; the backend must verify independently; the outer signature must have identifier `com.lelitte.push2talk` and be explicitly ad-hoc. Invalid packages fail before the renderer/permission handoff.
+- `build/tests/test_generate_builder_config.mjs`: regression coverage asserts the Mac signing contract.
+
+**Verification:**
+
+- Full clean build succeeded: run `0.1.0-20260730T111331Z-1f03f3f+dirty`.
+- DMG: `build/out/0.1.0-20260730T111331Z-1f03f3f+dirty/electron/Push 2 Talk-0.1.0-arm64.dmg` (marked `UNVERIFIED.txt` only because the interactive renderer gate was deliberately skipped).
+- Fixed outer app: valid on disk, satisfies its DR, `Identifier=com.lelitte.push2talk`, `Signature=adhoc`, CDHash `27a3a661...`.
+- Fixed packaged backend: valid on disk, satisfies its DR, `Signature=adhoc`, CDHash `bf876572...`.
+- Tests: 23/23 root Python tests, 21/21 Electron tests, 21/21 Node build tests, and 17/17 Python build tests passed.
+
+**Live acceptance completed later in the same session:** the fixed DMG was installed to `/Applications`. `tccutil reset Accessibility com.lelitte.push2talk` and `tccutil reset ListenEvent com.lelitte.push2talk` removed the stale `5c22...` requirements; Kevin then re-added the installed app in both System Settings panes. The resulting TCC rows were both `auth_value=2` and both required the fixed app's exact CDHash `27a3a661...`. Relaunch produced normal startup/ready diagnostics with no new fatal entry, and process inspection confirmed the Electron parent and `Contents/Resources/backend/push2talk-backend` child both remained alive. The reported `BACKEND_EXIT` permission bug is resolved. Do not re-sign or alter this installed ad-hoc build; doing so changes its CDHash and requires the two grants to be reset/re-added again.
 
 ## Session 2026-07-30 (continued) — Packaged app permission bug, handed to Codex unresolved
 

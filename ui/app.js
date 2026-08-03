@@ -564,7 +564,6 @@ async function saveSettings() {
 
   if (window.electronAPI) {
     window.electronAPI.sendCommand({ cmd: 'save_config', data });
-    showFlash('Settings saved');
     return;
   }
 
@@ -607,6 +606,16 @@ function handleBackendEvent(event) {
       break;
     case 'config':
       applyConfig(event);
+      break;
+    case 'settings_saved':
+      applyConfig(event.config);
+      if (event.config && event.config.hotkey_raw) {
+        setHotkeyDisplay(event.config.hotkey_raw, event.hotkey_display);
+      }
+      showFlash('Settings saved');
+      break;
+    case 'settings_error':
+      showFlash(event.message || 'Could not save settings');
       break;
     default:
       console.warn('[backend] unknown event type:', event.type);

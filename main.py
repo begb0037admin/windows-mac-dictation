@@ -30,6 +30,7 @@ keystroke silently does nothing.
 
 import ctypes
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -44,7 +45,11 @@ from pynput import keyboard, mouse
 from cleanup import cleanup
 from config import CONFIG_PATH, load_config
 from inject import inject
-from transcribe import transcribe
+from transcribe import (
+    UnreliableTranscriptionError,
+    has_repetition_loop,
+    transcribe,
+)
 
 # A PyInstaller-frozen console exe on Windows does not reliably default its
 # stdio streams to UTF-8 when there is no real console attached (e.g. piped
@@ -106,19 +111,32 @@ def resolve_hotkey(name):
 HOTKEY = resolve_hotkey(HOTKEY_NAME)
 HOTKEY_IS_MOUSE = isinstance(HOTKEY, mouse.Button)
 
-if HOTKEY_IS_MOUSE:
-    HOTKEY_DISPLAY = {
-        "mouse_left": "Left Mouse Button",
-        "mouse_right": "Right Mouse Button",
-        "mouse_middle": "Middle Mouse Button",
-        "mouse_x1": "Mouse Button 4",
-        "mouse_x2": "Mouse Button 5",
-    }[HOTKEY_NAME]
-else:
-    HOTKEY_DISPLAY = HOTKEY_NAME.replace("_r", " (right)").replace("_l", " (left)").replace("_", " ").title()
+MOUSE_BUTTON_DISPLAY_NAMES = {
+    "mouse_left": "Left Mouse Button",
+    "mouse_right": "Right Mouse Button",
+    "mouse_middle": "Middle Mouse Button",
+    "mouse_x1": "Mouse Button 4",
+    "mouse_x2": "Mouse Button 5",
+}
+
+
+def describe_hotkey(name, resolved_hotkey):
+    if isinstance(resolved_hotkey, mouse.Button):
+        return MOUSE_BUTTON_DISPLAY_NAMES[name]
+    display = (
+        name.replace("_r", " (right)")
+        .replace("_l", " (left)")
+        .replace("_", " ")
+        .title()
+    )
     if platform.system() == "Darwin":
-        HOTKEY_DISPLAY = HOTKEY_DISPLAY.replace("Alt", "Option")
+        display = display.replace("Alt", "Option")
+    return display
+
+
+HOTKEY_DISPLAY = describe_hotkey(HOTKEY_NAME, HOTKEY)
 IDLE_STATUS = f"Hold {HOTKEY_DISPLAY} to record"
+hotkey_listener = None
 
 state_lock = threading.Lock()
 transcribe_lock = threading.Lock()
@@ -284,11 +302,16 @@ def cmd_save_config(data):
     except Exception:
         raw = {}
 
-    if "hotkey" in data and data["hotkey"]:
+    requested_hotkey = data.get("hotkey")
+    if requested_hotkey:
+        # Validate before changing either disk or the live listener. This
+        # makes a bad renderer value fail visibly instead of being persisted
+        # and then crashing the backend on its next launch.
+        resolve_hotkey(requested_hotkey)
         plat = "darwin" if platform.system() == "Darwin" else "windows"
         if "hotkey" not in raw or not isinstance(raw["hotkey"], dict):
             raw["hotkey"] = {}
-        raw["hotkey"][plat] = data["hotkey"]
+        raw["hotkey"][plat] = requested_hotkey
 
     if "theme" in data:
         raw["theme"] = data["theme"]
@@ -309,13 +332,29 @@ def cmd_save_config(data):
     with open(CONFIG_PATH, "w") as f:
         json.dump(raw, f, indent=2)
 
+    if requested_hotkey:
+        apply_runtime_hotkey(requested_hotkey)
+
+    emit_event({
+        "type": "settings_saved",
+        "config": get_config_dict(),
+        "hotkey_display": HOTKEY_DISPLAY,
+    })
+
 
 def handle_command(cmd):
     action = cmd.get("cmd")
     if action == "get_config":
         emit_event(get_config_dict())
     elif action == "save_config":
-        cmd_save_config(cmd.get("data", {}))
+        try:
+            cmd_save_config(cmd.get("data", {}))
+        except Exception as exc:
+            print(f"[settings] save failed: {exc}", file=sys.stderr)
+            emit_event({
+                "type": "settings_error",
+                "message": f"Could not save settings: {exc}",
+            })
     else:
         print(f"[stdin] unknown command: {action!r}", file=sys.stderr)
 
@@ -366,6 +405,59 @@ def audio_callback(indata, frame_count, time_info, status):
 
 PARTIAL_INTERVAL_SECONDS = 0.8
 CHUNK_SECONDS = 5
+AUDIO_MIN_RMS = 0.0015
+AUDIO_MIN_PEAK = 0.008
+AUDIO_ACTIVITY_FLOOR = 0.003
+AUDIO_MIN_ACTIVE_FRACTION = 0.02
+
+
+def audio_signal_metrics(audio):
+    flat = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if flat.size == 0:
+        return 0.0, 0.0, 0.0
+    rms = float(np.sqrt(np.mean(np.square(flat))))
+    peak = float(np.max(np.abs(flat)))
+    active_fraction = float(np.mean(np.abs(flat) >= AUDIO_ACTIVITY_FLOOR))
+    return rms, peak, active_fraction
+
+
+def audio_signal_is_usable(audio):
+    """Reject silence/near-silence before a language model can invent text."""
+    rms, peak, active_fraction = audio_signal_metrics(audio)
+    return (
+        rms >= AUDIO_MIN_RMS
+        and peak >= AUDIO_MIN_PEAK
+        and active_fraction >= AUDIO_MIN_ACTIVE_FRACTION
+    )
+
+
+def live_partial_transcription_enabled(whisper_config):
+    """Large Turbo is reserved for the final pass to avoid duplicate latency."""
+    model_size = str(whisper_config.get("model_size", "")).lower()
+    repo = str(whisper_config.get("hf_repo", "")).lower()
+    return "large-v3-turbo" not in model_size and "large-v3-turbo" not in repo
+
+
+def log_stage_timing(code, started_at, char_count=None):
+    """Emit content-free timings through Electron's diagnostic allowlist."""
+    payload = {
+        "code": code,
+        "duration_ms": round((time.perf_counter() - started_at) * 1000),
+    }
+    if char_count is not None:
+        payload["char_count"] = char_count
+    print(f"P2T_DIAG {json.dumps(payload)}", file=sys.stderr)
+
+
+def choose_safe_cleanup_output(raw_text, cleaned_text):
+    """Never let a cleanup-model repetition loop replace a safe transcript."""
+    if has_repetition_loop(cleaned_text):
+        print(
+            'P2T_DIAG {"code":"CLEANUP_REPETITION_REJECTED"}',
+            file=sys.stderr,
+        )
+        return raw_text
+    return cleaned_text
 
 
 def partial_transcription_loop(stop_event):
@@ -429,13 +521,20 @@ def start_recording():
     push_status("recording", "Listening...")
     push_transcript("")
     print("[rec] recording started")
-    threading.Thread(
-        target=partial_transcription_loop, args=(local_stop_event,), daemon=True
-    ).start()
+    if live_partial_transcription_enabled(config["whisper"]):
+        threading.Thread(
+            target=partial_transcription_loop, args=(local_stop_event,), daemon=True
+        ).start()
+    else:
+        print(
+            'P2T_DIAG {"code":"LIVE_CAPTIONS_DISABLED_LARGE_TURBO"}',
+            file=sys.stderr,
+        )
 
 
 def stop_recording():
     global recording, stream
+    pipeline_started_at = time.perf_counter()
     with state_lock:
         if not recording:
             return
@@ -464,12 +563,48 @@ def stop_recording():
         f"[rec] recording stopped — {len(audio)} samples, "
         f"{duration_s:.2f}s captured at {SAMPLE_RATE}Hz"
     )
+    rms, peak, active_fraction = audio_signal_metrics(audio)
+    print(
+        "P2T_DIAG "
+        + json.dumps(
+            {
+                "code": "AUDIO_SIGNAL",
+                "rms_milli": round(rms * 1000, 2),
+                "peak_milli": round(peak * 1000, 2),
+                "active_percent": round(active_fraction * 100, 2),
+            }
+        ),
+        file=sys.stderr,
+    )
+    if not audio_signal_is_usable(audio):
+        print(
+            'P2T_DIAG {"code":"TRANSCRIPTION_REJECTED","error_class":"insufficient_audio_signal"}',
+            file=sys.stderr,
+        )
+        push_status(
+            "error",
+            "No clear speech was detected, so nothing was pasted.",
+        )
+        return
 
     push_status("transcribing", "Transcribing...")
+    transcription_started_at = time.perf_counter()
     try:
         with transcribe_lock:
             text = transcribe(audio, SAMPLE_RATE, config["whisper"])
+        log_stage_timing(
+            "TRANSCRIPTION_TIMING",
+            transcription_started_at,
+            char_count=len(text),
+        )
         print(f"[transcribe] result: {text!r}")
+    except UnreliableTranscriptionError as exc:
+        print(
+            f'P2T_DIAG {json.dumps({"code": "TRANSCRIPTION_REJECTED", "error_class": exc.reason})}',
+            file=sys.stderr,
+        )
+        push_status("error", str(exc))
+        return
     except Exception as exc:
         print(f"[transcribe] failed: {exc}", file=sys.stderr)
         push_status("error", f"Transcription failed: {exc}")
@@ -477,15 +612,28 @@ def stop_recording():
 
     push_transcript(text)
     push_status("cleanup", "Cleaning up...")
+    cleanup_started_at = time.perf_counter()
     try:
         cleaned = cleanup(text, config["cleanup"])
+        cleaned = choose_safe_cleanup_output(text, cleaned)
+        log_stage_timing(
+            "CLEANUP_TIMING",
+            cleanup_started_at,
+            char_count=len(cleaned),
+        )
         print(f"[cleanup] result: {cleaned!r}")
     except Exception as exc:
+        log_stage_timing("CLEANUP_FAILED_TIMING", cleanup_started_at)
         print(f"[cleanup] failed: {exc}", file=sys.stderr)
         print("[cleanup] falling back to the raw transcript for injection")
         cleaned = text
 
     push_final_text(cleaned)
+    log_stage_timing(
+        "DICTATION_READY_TIMING",
+        pipeline_started_at,
+        char_count=len(cleaned),
+    )
     paste_text(cleaned)
 
 
@@ -517,12 +665,73 @@ def run_hotkey_listener():
     # own. A mouse-button hotkey (e.g. middle-click) still triggers
     # whatever that button normally does wherever the cursor is
     # (autoscroll, open-link-in-new-tab, etc) in addition to dictation.
+    global hotkey_listener
     if HOTKEY_IS_MOUSE:
         listener = mouse.Listener(on_click=on_click)
     else:
         listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
+    hotkey_listener = listener
     return listener
+
+
+def apply_runtime_hotkey(name):
+    """Switch the active pynput listener to a newly saved hotkey.
+
+    Settings used to update config.json only. Since closing the Electron
+    window hides the app to the tray rather than quitting it, that left the
+    old listener alive indefinitely and made Settings appear broken. Stop
+    the old listener, update the runtime state, and start the appropriate
+    keyboard/mouse listener immediately.
+    """
+    global HOTKEY_NAME, HOTKEY, HOTKEY_IS_MOUSE
+    global HOTKEY_DISPLAY, IDLE_STATUS, hotkey_listener
+
+    resolved = resolve_hotkey(name)
+    if name == HOTKEY_NAME:
+        return False
+
+    previous = (
+        HOTKEY_NAME,
+        HOTKEY,
+        HOTKEY_IS_MOUSE,
+        HOTKEY_DISPLAY,
+        IDLE_STATUS,
+    )
+    previous_listener = hotkey_listener
+
+    if previous_listener is not None:
+        previous_listener.stop()
+        previous_listener.join()
+        hotkey_listener = None
+
+    HOTKEY_NAME = name
+    HOTKEY = resolved
+    HOTKEY_IS_MOUSE = isinstance(resolved, mouse.Button)
+    HOTKEY_DISPLAY = describe_hotkey(name, resolved)
+    IDLE_STATUS = f"Hold {HOTKEY_DISPLAY} to record"
+
+    try:
+        run_hotkey_listener()
+    except Exception:
+        (
+            HOTKEY_NAME,
+            HOTKEY,
+            HOTKEY_IS_MOUSE,
+            HOTKEY_DISPLAY,
+            IDLE_STATUS,
+        ) = previous
+        run_hotkey_listener()
+        raise
+
+    config["hotkey"] = name
+    emit_event({
+        "type": "ready",
+        "hotkey_raw": HOTKEY_NAME,
+        "hotkey_display": HOTKEY_DISPLAY,
+    })
+    push_status("idle", IDLE_STATUS)
+    return True
 
 
 def check_macos_accessibility():
@@ -552,7 +761,47 @@ def check_macos_accessibility():
         sys.exit(1)
 
 
+def run_build_self_test_mlx():
+    """Exercise the real Mac transcription path from a frozen build.
+
+    Import-only and get_config smoke tests cannot detect omitted Metal
+    runtime resources: MLX loads mlx.metallib only when inference begins.
+    A second of synthetic silence is sufficient to force model and Metal
+    initialization without needing microphone or TCC access.
+    """
+    whisper_config = config["whisper"]
+    if platform.system() != "Darwin":
+        raise RuntimeError("MLX build self-test is only valid on macOS")
+    if whisper_config.get("backend") != "mlx-whisper":
+        raise RuntimeError("MLX build self-test requires the mlx-whisper backend")
+
+    audio = np.zeros(SAMPLE_RATE, dtype=np.float32)
+    safety_rejected_silence = False
+    try:
+        text = transcribe(audio, SAMPLE_RATE, whisper_config)
+    except UnreliableTranscriptionError:
+        # Synthetic silence being rejected is the desired production
+        # behavior. The model/Metal path still ran fully; dependency/runtime
+        # errors remain uncaught and continue to fail the build.
+        text = ""
+        safety_rejected_silence = True
+    emit_event({
+        "type": "build_self_test",
+        "component": "mlx_whisper",
+        "ok": True,
+        "transcript_length": len(text),
+        "safety_rejected_silence": safety_rejected_silence,
+    })
+
+
 def main():
+    # Build-only diagnostic: run before microphone and Accessibility checks
+    # so this isolates the packaged MLX/Whisper/Metal runtime. Normal app
+    # launches never set this environment variable.
+    if os.environ.get("P2T_BUILD_SELF_TEST_MLX") == "1":
+        run_build_self_test_mlx()
+        return
+
     try:
         sd.check_input_settings(samplerate=SAMPLE_RATE, channels=1)
     except Exception as exc:

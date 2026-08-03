@@ -11,10 +11,80 @@ at the correct sample rate). File transcription is handled separately by
 the meeting-transcriber tool.
 """
 
+import re
+
 import numpy as np
 
 _model = None
 _backend = None
+
+
+class UnreliableTranscriptionError(RuntimeError):
+    """The model produced text that is unsafe to paste automatically."""
+
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__("No reliable speech was detected, so nothing was pasted.")
+
+
+def has_repetition_loop(text, min_words=4, repeats=3):
+    """Detect an obvious contiguous phrase loop without rejecting brief emphasis."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    max_unit = len(words) // repeats
+    for unit_size in range(min_words, max_unit + 1):
+        span = unit_size * repeats
+        for start in range(0, len(words) - span + 1):
+            unit = words[start : start + unit_size]
+            if all(
+                words[start + index * unit_size : start + (index + 1) * unit_size]
+                == unit
+                for index in range(1, repeats)
+            ):
+                return True
+    return False
+
+
+def _segment_value(segment, key):
+    if isinstance(segment, dict):
+        return segment.get(key)
+    return getattr(segment, key, None)
+
+
+def _validate_transcription(text, segments, whisper_config):
+    if not text:
+        return
+    if has_repetition_loop(text):
+        raise UnreliableTranscriptionError("repetition_loop")
+
+    no_speech_threshold = whisper_config.get("no_speech_threshold", 0.6)
+    logprob_threshold = whisper_config.get("logprob_threshold", -1.0)
+    compression_threshold = whisper_config.get("compression_ratio_threshold", 2.4)
+
+    no_speech_values = [
+        value
+        for segment in segments
+        if (value := _segment_value(segment, "no_speech_prob")) is not None
+    ]
+    if no_speech_values and all(
+        value > no_speech_threshold for value in no_speech_values
+    ):
+        raise UnreliableTranscriptionError("probable_no_speech")
+
+    logprobs = [
+        value
+        for segment in segments
+        if (value := _segment_value(segment, "avg_logprob")) is not None
+    ]
+    if logprobs and sum(logprobs) / len(logprobs) < logprob_threshold:
+        raise UnreliableTranscriptionError("low_confidence")
+
+    compression_ratios = [
+        value
+        for segment in segments
+        if (value := _segment_value(segment, "compression_ratio")) is not None
+    ]
+    if compression_ratios and max(compression_ratios) > compression_threshold:
+        raise UnreliableTranscriptionError("high_compression")
 
 
 def _load_windows_model(whisper_config):
@@ -68,13 +138,42 @@ def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
     audio_input = audio.reshape(-1).astype(np.float32)
 
     if _backend == "faster-whisper":
-        segments, _info = model.transcribe(audio_input, language="en")
-        return " ".join(segment.text.strip() for segment in segments).strip()
+        segments_iter, _info = model.transcribe(
+            audio_input,
+            language=whisper_config.get("language", "en"),
+            beam_size=whisper_config.get("beam_size", 5),
+            condition_on_previous_text=whisper_config.get(
+                "condition_on_previous_text", False
+            ),
+            compression_ratio_threshold=whisper_config.get(
+                "compression_ratio_threshold", 2.4
+            ),
+            log_prob_threshold=whisper_config.get("logprob_threshold", -1.0),
+            no_speech_threshold=whisper_config.get("no_speech_threshold", 0.6),
+        )
+        segments = list(segments_iter)
+        text = " ".join(segment.text.strip() for segment in segments).strip()
+        _validate_transcription(text, segments, whisper_config)
+        return text
 
     if _backend == "mlx-whisper":
         import mlx_whisper
 
-        result = mlx_whisper.transcribe(audio_input, path_or_hf_repo=model)
-        return result["text"].strip()
+        result = mlx_whisper.transcribe(
+            audio_input,
+            path_or_hf_repo=model,
+            language=whisper_config.get("language", "en"),
+            condition_on_previous_text=whisper_config.get(
+                "condition_on_previous_text", False
+            ),
+            compression_ratio_threshold=whisper_config.get(
+                "compression_ratio_threshold", 2.4
+            ),
+            logprob_threshold=whisper_config.get("logprob_threshold", -1.0),
+            no_speech_threshold=whisper_config.get("no_speech_threshold", 0.6),
+        )
+        text = result["text"].strip()
+        _validate_transcription(text, result.get("segments", []), whisper_config)
+        return text
 
     raise ValueError(f"Unknown whisper backend '{_backend}'")

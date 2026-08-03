@@ -65,6 +65,45 @@ assert_generated_pair() {
         || fail 11 "generated builder config/metadata does not describe the active run"
 }
 
+# TCC grants for Accessibility/Input Monitoring are code-requirement-bound,
+# not bundle-ID-only. An app that merely has CFBundleIdentifier set but is
+# not a valid signed bundle is evaluated as a raw executable path instead,
+# which cannot match the bundle row shown in System Settings. Validate both
+# the full seal and the embedded backend immediately after each builder pass
+# so an unusable package can never advance to the human permission gate.
+assert_mac_signature() {
+    local app_bundle="$1"
+    local backend_exe="$app_bundle/Contents/Resources/backend/push2talk-backend"
+    local app_signing_info
+
+    codesign --verify --deep --strict --verbose=2 "$app_bundle" \
+        || fail 19 "packaged app is not a valid consistently signed bundle: $app_bundle"
+    codesign --verify --strict --verbose=2 "$backend_exe" \
+        || fail 19 "packaged backend is not validly signed: $backend_exe"
+
+    app_signing_info="$(codesign -dvvv "$app_bundle" 2>&1)" \
+        || fail 19 "could not inspect packaged app signature: $app_bundle"
+    echo "$app_signing_info" | grep -q '^Identifier=com\.lelitte\.push2talk$' \
+        || fail 19 "packaged app signature has the wrong identifier"
+    echo "$app_signing_info" | grep -q '^Signature=adhoc$' \
+        || fail 19 "unsigned internal Mac package must use the explicit ad-hoc signing contract"
+}
+
+assert_mlx_runtime() {
+    local app_bundle="$1"
+    local metallib="$app_bundle/Contents/Resources/backend/_internal/mlx/lib/mlx.metallib"
+    local asset
+
+    if [ ! -s "$metallib" ]; then
+        fail 19 "packaged MLX Metal shader library is missing or empty: $metallib"
+    fi
+    for asset in mel_filters.npz gpt2.tiktoken multilingual.tiktoken; do
+        if [ ! -s "$app_bundle/Contents/Resources/backend/_internal/mlx_whisper/assets/$asset" ]; then
+            fail 19 "packaged mlx-whisper runtime asset is missing or empty: $asset"
+        fi
+    done
+}
+
 # Step 1: version, git SHA, dirty state.
 GIT_SHA="$(cd "$REPO_ROOT" && git rev-parse HEAD)"
 GIT_DIRTY=0
@@ -153,6 +192,13 @@ node --test "$REPO_ROOT/build/tests/test_generate_icon.mjs" || fail 2 "generate-
 FROZEN_EXE="$RUN_ROOT/backend/push2talk-backend/push2talk-backend"
 if [ ! -x "$FROZEN_EXE" ]; then fail 12 "frozen backend executable missing or not executable: $FROZEN_EXE"; fi
 
+# MLX can initialize Python multiprocessing shared resources on macOS. Prove
+# the frozen entry point diverts the resulting resource-tracker invocation
+# instead of recursively starting another complete dictation backend.
+"$VENV_PYTHON" "$REPO_ROOT/build/validate-mac-frozen-multiprocessing.py" \
+    "$FROZEN_EXE" \
+    || fail 12 "frozen backend did not divert the multiprocessing resource tracker"
+
 SMOKE_OUT="$(mktemp)"
 SMOKE_ERR="$(mktemp)"
 # No GNU `timeout` on stock macOS - poll a background job manually instead.
@@ -176,6 +222,39 @@ if ! grep -q '"type":[[:space:]]*"config"' "$SMOKE_OUT" || ! grep -q 'hotkey_raw
     fail 13 "frozen backend did not return a valid config response to get_config"
 fi
 rm -f "$SMOKE_OUT" "$SMOKE_ERR"
+
+# get_config proves the stdio protocol starts, but it never initializes MLX.
+# Run real Whisper inference inside the frozen executable so missing Metal
+# runtime data (especially mlx.metallib) fails the build, before Electron
+# packaging or any installation is attempted.
+MLX_SMOKE_OUT="$(mktemp)"
+MLX_SMOKE_ERR="$(mktemp)"
+P2T_BUILD_SELF_TEST_MLX=1 "$FROZEN_EXE" >"$MLX_SMOKE_OUT" 2>"$MLX_SMOKE_ERR" &
+MLX_SMOKE_PID=$!
+MLX_SMOKE_WAITED=0
+MLX_SMOKE_TIMEOUT=600
+while kill -0 "$MLX_SMOKE_PID" 2>/dev/null && [ "$MLX_SMOKE_WAITED" -lt "$MLX_SMOKE_TIMEOUT" ]; do
+    sleep 1
+    MLX_SMOKE_WAITED=$((MLX_SMOKE_WAITED + 1))
+done
+if kill -0 "$MLX_SMOKE_PID" 2>/dev/null; then
+    kill -9 "$MLX_SMOKE_PID" 2>/dev/null || true
+    wait "$MLX_SMOKE_PID" 2>/dev/null || true
+    fail 13 "frozen backend did not complete MLX Whisper inference within ${MLX_SMOKE_TIMEOUT} seconds"
+fi
+MLX_SMOKE_EXIT=0
+wait "$MLX_SMOKE_PID" 2>/dev/null || MLX_SMOKE_EXIT=$?
+if [ "$MLX_SMOKE_EXIT" -ne 0 ]; then
+    tail -n 20 "$MLX_SMOKE_ERR" >&2
+    fail 13 "frozen backend MLX Whisper inference exited with code $MLX_SMOKE_EXIT"
+fi
+if ! grep -q '"type":[[:space:]]*"build_self_test"' "$MLX_SMOKE_OUT" \
+    || ! grep -q '"component":[[:space:]]*"mlx_whisper"' "$MLX_SMOKE_OUT" \
+    || ! grep -q '"ok":[[:space:]]*true' "$MLX_SMOKE_OUT"; then
+    tail -n 20 "$MLX_SMOKE_ERR" >&2
+    fail 13 "frozen backend did not report successful MLX Whisper inference"
+fi
+rm -f "$MLX_SMOKE_OUT" "$MLX_SMOKE_ERR"
 
 # Step 14: require all four UI source files.
 for f in index.html app.js styles.css logo.svg; do
@@ -215,7 +294,7 @@ if [ "${#APP_CANDIDATES[@]}" -gt 1 ]; then
 fi
 APP_BUNDLE="${APP_CANDIDATES[0]}"
 RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
-for required in ui/index.html ui/app.js ui/styles.css ui/logo.svg backend/push2talk-backend; do
+for required in ui/index.html ui/app.js ui/styles.css ui/logo.svg backend/push2talk-backend backend/_internal/mlx/lib/mlx.metallib backend/_internal/mlx_whisper/assets/mel_filters.npz backend/_internal/mlx_whisper/assets/gpt2.tiktoken backend/_internal/mlx_whisper/assets/multilingual.tiktoken; do
     if [ ! -f "$RESOURCES_DIR/$required" ]; then
         fail 19 "packaged inventory missing: Contents/Resources/$required"
     fi
@@ -225,6 +304,8 @@ EXPECTED_UI_FILES="$(printf '%s\n' app.js index.html logo.svg styles.css | sort 
 if [ "$ACTUAL_UI_FILES" != "$EXPECTED_UI_FILES" ]; then
     fail 19 "Contents/Resources/ui must contain exactly four approved files; found: $ACTUAL_UI_FILES"
 fi
+assert_mac_signature "$APP_BUNDLE"
+assert_mlx_runtime "$APP_BUNDLE"
 
 # Step 20-23: launch the unpacked app, human renderer gate, close-and-verify
 # (M12) - unless --skip-smoke-test, in which case packaging still proceeds
@@ -279,6 +360,8 @@ fi
 assert_generated_pair "$GENERATED_CONFIG" "$RUN_ID" mac "$ARCH" "$EXPECTED_BACKEND_SOURCE" "$EXPECTED_ELECTRON_OUTPUT"
 (cd "$ELECTRON_DIR" && ./node_modules/.bin/electron-builder --mac dmg --config "$GENERATED_CONFIG" --publish=never) \
     || fail 17 "electron-builder dmg failed"
+assert_mac_signature "$APP_BUNDLE"
+assert_mlx_runtime "$APP_BUNDLE"
 
 # $RUN_ROOT was created fresh by this invocation (step 2 above aborts if it
 # already exists), so any *.dmg found under it now was necessarily produced

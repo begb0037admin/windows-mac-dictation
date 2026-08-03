@@ -50,14 +50,17 @@ DEFAULTS = {
     "whisper": {
         "windows": {
             "backend": "faster-whisper",
-            "model_size": "small",
+            "model_size": "large-v3-turbo",
             "device": "cuda",
             "compute_type": "float16",
+            "language": "en",
+            "beam_size": 5,
         },
         "darwin": {
             "backend": "mlx-whisper",
-            "model_size": "small",
-            "hf_repo": "mlx-community/whisper-small-mlx",
+            "model_size": "large-v3-turbo",
+            "hf_repo": "mlx-community/whisper-large-v3-turbo",
+            "language": "en",
         },
     },
     "cleanup": {
@@ -69,6 +72,20 @@ DEFAULTS = {
     "theme": "dark",
     "opacity": "glass",
     "alwaysOnTop": True,
+}
+
+LEGACY_WHISPER_DEFAULTS = {
+    "windows": {
+        "backend": "faster-whisper",
+        "model_size": "small",
+        "device": "cuda",
+        "compute_type": "float16",
+    },
+    "darwin": {
+        "backend": "mlx-whisper",
+        "model_size": "small",
+        "hf_repo": "mlx-community/whisper-small-mlx",
+    },
 }
 
 
@@ -93,6 +110,34 @@ def _deep_merge(defaults, overrides):
     return merged
 
 
+def _migrate_legacy_whisper_defaults(raw):
+    """Upgrade only the old shipped models; leave custom model choices alone."""
+    whisper = raw.get("whisper")
+    if not isinstance(whisper, dict):
+        return False
+
+    changed = False
+    for platform_name, legacy in LEGACY_WHISPER_DEFAULTS.items():
+        platform_config = whisper.get(platform_name)
+        if not isinstance(platform_config, dict):
+            continue
+        if not all(
+            platform_config.get(key) == value for key, value in legacy.items()
+        ):
+            continue
+
+        new_default = DEFAULTS["whisper"][platform_name]
+        platform_config["model_size"] = new_default["model_size"]
+        if platform_name == "darwin":
+            platform_config["hf_repo"] = new_default["hf_repo"]
+        platform_config.setdefault("language", new_default["language"])
+        if "beam_size" in new_default:
+            platform_config.setdefault("beam_size", new_default["beam_size"])
+        changed = True
+
+    return changed
+
+
 def load_config():
     """Load config.json, deep-merge with defaults, and resolve the platform-keyed
     hotkey/whisper sections down to the values for the OS this is running on.
@@ -104,6 +149,9 @@ def load_config():
     else:
         with open(CONFIG_PATH, "r") as f:
             raw = json.load(f)
+
+    if _migrate_legacy_whisper_defaults(raw):
+        CONFIG_PATH.write_text(json.dumps(raw, indent=2))
 
     merged = _deep_merge(DEFAULTS, raw)
 

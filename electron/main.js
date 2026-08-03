@@ -23,6 +23,7 @@ const path = require('path');
 const { sanitizeStderrLine } = require('./diagnostics');
 const { applyAutostartToggle, reconcileLoginItemOnStartup } = require('./login-item-logic');
 const { FatalGate } = require('./fatal-gate');
+const { installSingleInstanceGuard } = require('./single-instance-logic');
 
 const REPO_ROOT = path.join(__dirname, '..');
 
@@ -90,6 +91,7 @@ let progressTimer = null;
 let absoluteTimer = null;
 let stoppedSendingCommands = false;
 let lastKnownAutostart = false;
+const isPrimaryInstance = installSingleInstanceGuard(app, () => mainWindow);
 
 function sendToRenderer(event) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -550,13 +552,15 @@ function createWindow() {
   return win;
 }
 
-app.whenReady().then(() => {
-  createWindow();
+if (isPrimaryInstance) {
+  app.whenReady().then(() => {
+    createWindow();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
+}
 
 app.on('window-all-closed', () => {
   appQuitting = true;

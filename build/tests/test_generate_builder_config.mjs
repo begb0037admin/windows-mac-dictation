@@ -127,6 +127,22 @@ test('generated Windows config fixes architecture, icons, and shortcuts', () => 
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
+test('generated Mac config explicitly ad-hoc signs the complete app bundle', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-mac-signing';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+  assert.equal(config.mac.identity, '-', 'must opt in to ad-hoc signing instead of silently skipping signing');
+  assert.equal(config.mac.hardenedRuntime, false, 'ad-hoc builds must not enable Team-ID-dependent library validation');
+  assert.equal(config.mac.forceCodeSigning, true, 'a signing failure must fail the package build');
+
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
 test('packaged app ships the tray icon as a real extraResource (not extracted from the exe)', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-7';
@@ -139,6 +155,18 @@ test('packaged app ships the tray icon as a real extraResource (not extracted fr
   assert.ok(iconResource, 'must ship an "icons" extraResource so main.js can load it via process.resourcesPath at runtime');
   assert.deepEqual(iconResource.filter, ['icon.ico']);
   assert.match(iconResource.from, /electron[\\/]build$/);
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('packaged app includes the single-instance guard required by main.js', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-single-instance';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+  assert.ok(config.files.includes('single-instance-logic.js'));
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 

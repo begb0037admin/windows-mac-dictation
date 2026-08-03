@@ -2,19 +2,22 @@
   "sample_rate": 16000,
   "hotkey": {
     "windows": "ctrl_r",
-    "darwin": "mouse_middle"
+    "darwin": "alt_l"
   },
   "whisper": {
     "windows": {
       "backend": "faster-whisper",
-      "model_size": "small",
+      "model_size": "large-v3-turbo",
       "device": "cuda",
-      "compute_type": "float16"
+      "compute_type": "float16",
+      "language": "en",
+      "beam_size": 5
     },
     "darwin": {
       "backend": "mlx-whisper",
-      "model_size": "small",
-      "hf_repo": "mlx-community/whisper-small-mlx"
+      "model_size": "large-v3-turbo",
+      "hf_repo": "mlx-community/whisper-large-v3-turbo",
+      "language": "en"
     }
   },
   "cleanup": {

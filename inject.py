@@ -15,6 +15,30 @@ import pyautogui
 import pyperclip
 
 
+def _paste_macos() -> None:
+    """Post Command-V with the modifier attached to the V events.
+
+    PyAutoGUI's macOS hotkey implementation posts Command-down and V as
+    separate Quartz events. In the packaged app macOS did not carry that
+    synthetic modifier state onto the V event, so a literal "v" appeared in
+    the target. Setting kCGEventFlagMaskCommand on both V events expresses
+    the shortcut atomically in the event metadata macOS actually evaluates.
+    """
+    from Quartz import (
+        CGEventCreateKeyboardEvent,
+        CGEventPost,
+        CGEventSetFlags,
+        kCGEventFlagMaskCommand,
+        kCGHIDEventTap,
+    )
+
+    # macOS virtual key code 9 is the physical V key used by Command-V.
+    for is_key_down in (True, False):
+        event = CGEventCreateKeyboardEvent(None, 9, is_key_down)
+        CGEventSetFlags(event, kCGEventFlagMaskCommand)
+        CGEventPost(kCGHIDEventTap, event)
+
+
 def inject(text: str) -> None:
     """Copy text to the clipboard and simulate a paste at the cursor."""
     if not text.strip():
@@ -28,7 +52,7 @@ def inject(text: str) -> None:
     time.sleep(0.05)
 
     if platform.system() == "Darwin":
-        pyautogui.hotkey("command", "v")
+        _paste_macos()
     else:
         pyautogui.hotkey("ctrl", "v")
 

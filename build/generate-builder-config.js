@@ -113,7 +113,7 @@ function main() {
     // login-item-logic.js/fatal-gate.js at runtime - omitting them from the
     // packaged app.asar would make the packaged app fail to launch with
     // MODULE_NOT_FOUND. Every module main.js actually loads must be listed.
-    files: ['main.js', 'preload.js', 'package.json', 'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js'],
+    files: ['main.js', 'preload.js', 'package.json', 'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js', 'single-instance-logic.js'],
     extraResources: [
       { from: uiSource, to: 'ui', filter: ['index.html', 'app.js', 'styles.css', 'logo.svg'] },
       { from: backendSource, to: 'backend', filter: ['**/*'] },
@@ -131,6 +131,25 @@ function main() {
       target: args.platform === 'mac' ? [{ target: 'dmg', arch: [args.arch] }] : undefined,
       icon: path.join(repoRoot, 'electron', 'build', 'icon.icns'),
       category: 'public.app-category.productivity',
+      // A missing Developer ID identity is not an unsigned-distribution
+      // strategy: electron-builder skips signing entirely by default, and
+      // macOS TCC then falls back from the app bundle to a raw executable
+      // path when the spawned backend asks for Input Monitoring access.
+      // The System Settings grant is stored for the bundle, so those two
+      // subjects can never match. Explicitly opt into electron-builder's
+      // supported ad-hoc signing path; @electron/osx-sign walks every Mach-O
+      // below Contents (including the loose PyInstaller backend under
+      // Resources) before sealing the outer app.
+      //
+      // Ad-hoc signatures have no Team ID and are identified by CDHash, so a
+      // rebuilt app still needs its privacy grants toggled off/on. Developer
+      // ID signing is the future route to grants surviving app updates.
+      identity: '-',
+      // electron-builder defaults this to true, but hardened runtime plus an
+      // ad-hoc signature requires disable-library-validation and is not part
+      // of this unsigned internal build. Keep the signing contract explicit.
+      hardenedRuntime: false,
+      forceCodeSigning: true,
       // FINAL_BRIEF.md SS4 calls for "microphone and Apple Events" usage
       // descriptions specifically. Accessibility permission (also needed,
       // for paste simulation - see docs on Input Monitoring/Accessibility

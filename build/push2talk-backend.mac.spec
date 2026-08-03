@@ -38,24 +38,69 @@ REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, '..'))
 # built without this fix was missing it entirely, which would only surface
 # as a crash the moment mlx_whisper actually runs Metal inference, not at
 # import time or in the lightweight get_config smoke test build-app.sh
-# runs. Explicitly bundling every .dylib mlx ships (not just the one this
-# session found missing) is more robust against PyInstaller's scanner
-# missing others the same way.
+# runs. MLX also loads mlx.metallib at runtime; it is Metal shader data, not
+# a Mach-O binary, so PyInstaller will not discover it from binary linkage.
+# Explicitly bundle both classes of MLX runtime resource.
 import mlx
+import mlx_whisper
 # mlx is a namespace package - __file__ is None, __path__ is the real thing.
 MLX_LIB_DIR = os.path.join(list(mlx.__path__)[0], 'lib')
 mlx_dylibs = [
     (path, 'mlx/lib')
     for path in glob.glob(os.path.join(MLX_LIB_DIR, '*.dylib'))
 ]
+mlx_metallibs = [
+    (path, 'mlx/lib')
+    for path in glob.glob(os.path.join(MLX_LIB_DIR, '*.metallib'))
+]
+if len(mlx_metallibs) != 1:
+    raise RuntimeError(
+        f'Expected exactly one MLX Metal shader library in {MLX_LIB_DIR}, '
+        f'found {len(mlx_metallibs)}'
+    )
+
+# mlx-whisper resolves these files relative to its own module at inference
+# time. They are package data rather than imports, so Analysis does not
+# discover them automatically.
+MLX_WHISPER_ASSETS_DIR = os.path.join(
+    os.path.dirname(mlx_whisper.__file__), 'assets'
+)
+mlx_whisper_asset_names = (
+    'mel_filters.npz',
+    'gpt2.tiktoken',
+    'multilingual.tiktoken',
+)
+mlx_whisper_assets = [
+    (os.path.join(MLX_WHISPER_ASSETS_DIR, name), 'mlx_whisper/assets')
+    for name in mlx_whisper_asset_names
+]
+missing_mlx_whisper_assets = [
+    path for path, _destination in mlx_whisper_assets
+    if not os.path.isfile(path)
+]
+if missing_mlx_whisper_assets:
+    raise RuntimeError(
+        f'Missing required mlx-whisper runtime assets: '
+        f'{missing_mlx_whisper_assets}'
+    )
 
 a = Analysis(
-    [os.path.join(REPO_ROOT, 'main.py')],
+    [
+        os.path.join(
+            REPO_ROOT,
+            'build',
+            'push2talk-backend.mac-entry.py',
+        )
+    ],
     pathex=[REPO_ROOT],
     binaries=mlx_dylibs,
-    datas=[],
+    datas=mlx_metallibs + mlx_whisper_assets,
     hiddenimports=[
         'mlx_whisper',
+        # mlx.core imports this dynamically while initializing its native
+        # extension, so PyInstaller cannot discover it through static
+        # analysis of mlx-whisper's ordinary `import mlx.core`.
+        'mlx._reprlib_fix',
         'huggingface_hub',
         'tokenizers',
     ],

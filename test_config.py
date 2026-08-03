@@ -52,6 +52,20 @@ class DeepMergeTests(unittest.TestCase):
         key."""
         self.assertEqual(config.DEFAULTS["hotkey"]["darwin"], "alt_l")
 
+    def test_both_platforms_default_to_large_v3_turbo(self):
+        self.assertEqual(
+            config.DEFAULTS["whisper"]["windows"]["model_size"],
+            "large-v3-turbo",
+        )
+        self.assertEqual(
+            config.DEFAULTS["whisper"]["darwin"]["model_size"],
+            "large-v3-turbo",
+        )
+        self.assertEqual(
+            config.DEFAULTS["whisper"]["darwin"]["hf_repo"],
+            "mlx-community/whisper-large-v3-turbo",
+        )
+
 
 class LoadConfigTests(unittest.TestCase):
     def _load_with(self, raw_config, platform_name):
@@ -79,6 +93,50 @@ class LoadConfigTests(unittest.TestCase):
     def test_platform_with_no_default_coverage_raises_clear_error(self):
         with self.assertRaises(ValueError):
             self._load_with({}, "linux")
+
+    def test_old_shipped_models_are_migrated_and_persisted(self):
+        raw = {
+            "whisper": {
+                "windows": dict(config.LEGACY_WHISPER_DEFAULTS["windows"]),
+                "darwin": dict(config.LEGACY_WHISPER_DEFAULTS["darwin"]),
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(json.dumps(raw))
+            with mock.patch.object(config, "CONFIG_PATH", config_path), mock.patch.object(
+                config, "CURRENT_PLATFORM", "darwin"
+            ):
+                resolved = config.load_config()
+            persisted = json.loads(config_path.read_text())
+
+        self.assertEqual(resolved["whisper"]["model_size"], "large-v3-turbo")
+        self.assertEqual(
+            resolved["whisper"]["hf_repo"],
+            "mlx-community/whisper-large-v3-turbo",
+        )
+        self.assertEqual(
+            persisted["whisper"]["windows"]["model_size"], "large-v3-turbo"
+        )
+        self.assertEqual(
+            persisted["whisper"]["darwin"]["model_size"], "large-v3-turbo"
+        )
+
+    def test_custom_model_is_not_migrated(self):
+        resolved = self._load_with(
+            {
+                "whisper": {
+                    "darwin": {
+                        "backend": "mlx-whisper",
+                        "model_size": "custom",
+                        "hf_repo": "example/custom-whisper",
+                    }
+                }
+            },
+            "darwin",
+        )
+        self.assertEqual(resolved["whisper"]["model_size"], "custom")
+        self.assertEqual(resolved["whisper"]["hf_repo"], "example/custom-whisper")
 
 
 if __name__ == "__main__":

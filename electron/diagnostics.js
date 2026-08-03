@@ -8,7 +8,7 @@ const { createHash } = require('crypto');
 
 const DIAG_ALLOWED_KEYS = new Set([
   'code', 'url', 'error_class', 'char_count', 'duration_ms', 'deadline', 'exit_code',
-  'requested', 'actual',
+  'requested', 'actual', 'rms_milli', 'peak_milli', 'active_percent',
 ]);
 
 function sanitizeUrl(raw) {
