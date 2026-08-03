@@ -32,6 +32,7 @@ import ctypes
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import threading
@@ -462,6 +463,23 @@ def _looks_like_list_item(line: str) -> bool:
     return 0 < i < len(line) and line[i] in ".)"
 
 
+_WORD_RE = re.compile(r"[a-zA-Z0-9']+")
+_FILLER_WORDS = {"um", "umm", "uh", "uhh", "erm", "ah", "like"}
+
+
+def _content_words(text: str) -> set:
+    return {w.lower() for w in _WORD_RE.findall(text)}
+
+
+# Below this ratio, the cleaned result is treated as unrelated to what was
+# actually said rather than an edit of it. Low enough that legitimate
+# self-correction cleanup (which can legitimately drop an entire
+# superseded word/clause, e.g. "call John no wait call Mike" -> "Call
+# Mike.", observed ratio 0.4) still passes, while every fabricated-answer
+# case tried (observed ratio 0.0-0.25) does not.
+_MIN_VOCAB_OVERLAP = 0.35
+
+
 def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
     raw_stripped = raw.strip()
     cleaned_stripped = cleaned.strip()
@@ -486,6 +504,22 @@ def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
             if _looks_like_list_item(line.strip())
         )
         if list_like_lines >= 2:
+            return False
+
+    # Neither check above catches a short, plainly-worded fabricated
+    # answer -- e.g. "what is your name" -> "I don't have a personal
+    # name." is about the same length as the question and a single
+    # sentence, so it slips past both. Catch this class by vocabulary:
+    # cleanup only ever edits or removes words that were actually said,
+    # it never substitutes different ones, so the cleaned result should
+    # share most of the raw transcript's words. A result sharing very
+    # little vocabulary with the raw transcript is an answer to it, not
+    # an edit of it, regardless of length or shape.
+    raw_words = _content_words(raw_stripped) - _FILLER_WORDS
+    if raw_words:
+        cleaned_words = _content_words(cleaned_stripped)
+        overlap_ratio = len(raw_words & cleaned_words) / len(raw_words)
+        if overlap_ratio < _MIN_VOCAB_OVERLAP:
             return False
 
     return True
