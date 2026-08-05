@@ -44,13 +44,30 @@ function makeFakeChild({ killBehavior = 'async-exit' } = {}) {
 }
 
 function freshHooks(overrides = {}) {
-  const calls = { sendToRenderer: [], updateTrayStatus: [], onBackendExit: [], fatalNative: [], appendLog: [] };
+  const calls = {
+    sendToRenderer: [],
+    updateTrayStatus: [],
+    onBackendExit: [],
+    fatalNative: [],
+    appendLog: [],
+    // Turn-3 correction (Codex turn-2 finding): enterBackendUnavailable()'s
+    // own persistent presentation/exit hooks - see requestAppQuit() and
+    // "case 17" below.
+    showAndFocusWindow: [],
+    sendAppError: [],
+    setQuitting: [],
+    quitApp: [],
+  };
   const hooks = {
     sendToRenderer: (evt) => calls.sendToRenderer.push(evt),
     updateTrayStatus: (state, text) => calls.updateTrayStatus.push({ state, text }),
     appendLog: (prefix, text) => calls.appendLog.push({ prefix, text }),
     onBackendExit: (code) => calls.onBackendExit.push(code),
     fatalNative: (code, message, detail) => calls.fatalNative.push({ code, message, detail }),
+    showAndFocusWindow: () => calls.showAndFocusWindow.push(true),
+    sendAppError: (payload) => calls.sendAppError.push(payload),
+    setQuitting: () => calls.setQuitting.push(true),
+    quitApp: () => calls.quitApp.push(true),
     ...overrides,
   };
   return { hooks, calls };
@@ -133,8 +150,15 @@ test('case 13b: unconfirmed termination - never respawns, enters BACKEND_TERMINA
   assert.equal(supervisorState.unconfirmedTerminationChild, child2);
   assert.equal(supervisorState.expectedRecoveryExitChild, child2, 'left set deliberately for later suppression');
 
-  const fatalCodes = calls.fatalNative.map((c) => c.code);
-  assert.ok(fatalCodes.includes('BACKEND_TERMINATION_UNCONFIRMED'));
+  // Turn-3 correction (Codex turn-2 finding): enterBackendUnavailable() no
+  // longer routes through fatalNative()'s quit-only dialog lifecycle at
+  // all - it presents its own persistent state directly. See "case 17"
+  // below for the full presentation/exit assertions.
+  assert.equal(calls.fatalNative.length, 0, 'must not call fatalNative for BACKEND_TERMINATION_UNCONFIRMED');
+  assert.ok(calls.showAndFocusWindow.length >= 1, 'main window must be shown/focused on entering unavailable');
+  const errorPayloads = calls.sendAppError.filter((p) => p.code === 'BACKEND_TERMINATION_UNCONFIRMED');
+  assert.equal(errorPayloads.length, 1);
+  assert.equal(errorPayloads[0].severity, 'fatal', 'the renderer error panel must be non-dismissible');
 
   // No replacement spawn occurred, and a belated fake `ready` changes no state.
   const { markBackendReady } = backendSupervisor;
@@ -248,4 +272,47 @@ test('case 16: terminateAllKnownChildren retries an unconfirmed zombie in parall
   initSupervisor({}, hooks);
   assert.equal(supervisorState.unconfirmedTerminationChild, null);
   await terminateAllKnownChildren(); // pythonProcess is also null - must resolve cleanly
+});
+
+test('case 17: production unavailable-to-exit wiring - BACKEND_TERMINATION_UNCONFIRMED presents persistently, never auto-quits, and Exit retries the unconfirmed child before quitting', async () => {
+  const { hooks, calls } = freshHooks();
+  // Neither normal kill() nor the force-kill hook ever fires exit, so
+  // terminateBackend() genuinely cannot confirm this child's death - the
+  // exact real-world shape of an unconfirmed termination.
+  initSupervisor({}, { ...hooks, forceKillProcess: () => {} });
+
+  const child = makeFakeChild({ killBehavior: 'no-op' });
+  const spawnFn = () => child;
+  spawnBackend({}, { spawnFn });
+
+  await requestBackendRecovery('STREAM_TEARDOWN_TIMEOUT', child);
+
+  // Reached the terminal unavailable state via the unconfirmed-termination
+  // path, with the zombie child tracked for a later retry.
+  assert.equal(supervisorState.pythonProcess, null);
+  assert.equal(supervisorState.unconfirmedTerminationChild, child);
+
+  // Presentation: window shown/focused, persistent tray "unavailable"
+  // status, non-dismissible fatal renderer panel - and, critically, the app
+  // must not have quit itself. fatalNative() (the quit-only dialog
+  // lifecycle) must never be called for this state at all.
+  assert.equal(calls.fatalNative.length, 0);
+  assert.ok(calls.showAndFocusWindow.length >= 1, 'main window must be shown and focused');
+  const unavailableTrayCalls = calls.updateTrayStatus.filter((c) => c.state === 'unavailable');
+  assert.ok(unavailableTrayCalls.length >= 1, 'persistent unavailable tray status must be set');
+  const errorPayloads = calls.sendAppError.filter((p) => p.code === 'BACKEND_TERMINATION_UNCONFIRMED');
+  assert.equal(errorPayloads.length, 1);
+  assert.equal(errorPayloads[0].severity, 'fatal');
+  assert.equal(calls.quitApp.length, 0, 'must not automatically quit while awaiting an explicit Exit');
+  assert.equal(calls.setQuitting.length, 0, 'must not mark the app as quitting until Exit is actually chosen');
+
+  // Exit: the only way out of the unavailable state, and the only path that
+  // ever calls quitApp() - it must retry the still-unconfirmed zombie child
+  // (via terminateAllKnownChildren()) before quitting.
+  const killCallsBefore = child.killCalls;
+  await backendSupervisor.requestAppQuit();
+
+  assert.equal(calls.setQuitting.length, 1);
+  assert.ok(child.killCalls > killCallsBefore, 'Exit must retry termination against the unconfirmed child');
+  assert.equal(calls.quitApp.length, 1, 'quitApp() must run only after termination was awaited');
 });

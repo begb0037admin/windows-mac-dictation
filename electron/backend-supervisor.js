@@ -48,6 +48,16 @@ const DEFAULT_HOOKS = {
   fatalNative() {},
   onBackendExit() {},
   clearDeadlines() {},
+  // Turn-3 correction (Codex turn-2 finding): enterBackendUnavailable() must
+  // present its own persistent, retry-capable UI rather than routing through
+  // fatalNative()'s quit-only dialog lifecycle - see enterBackendUnavailable()
+  // and requestAppQuit() below. showAndFocusWindow/sendAppError present the
+  // state; setQuitting/quitApp are the only way out of it, and always go
+  // through requestAppQuit() so terminateAllKnownChildren() is awaited first.
+  showAndFocusWindow() {},
+  sendAppError() {},
+  setQuitting() {},
+  quitApp() {},
   // Not part of this brief's own recovery design (the pre-existing
   // startup-progress-deadline feature, unrelated to teardown recovery) -
   // added as a hook so a replacement backend spawned by
@@ -189,6 +199,21 @@ async function terminateAllKnownChildren() {
   ]);
 }
 
+/** The single, exclusive way this application ever actually quits (Turn-3
+ * correction, Codex turn-2 finding). Every exit path - the tray's own Exit
+ * item, and any native-dialog Quit button a caller retains elsewhere - must
+ * route through this function rather than calling hooks.quitApp() directly,
+ * so terminateAllKnownChildren() (including a retry against a still-tracked
+ * unconfirmedTerminationChild left over from an earlier unconfirmed
+ * termination) is always awaited first. Sets the quitting flag before
+ * termination begins so any exit events observed during teardown are
+ * correctly treated as expected. */
+async function requestAppQuit() {
+  supervisorState.hooks.setQuitting();
+  await terminateAllKnownChildren();
+  supervisorState.hooks.quitApp();
+}
+
 // ---------- readiness ----------
 
 /** Rejects stale-child readiness before changing any module state - a
@@ -215,7 +240,21 @@ function markBackendReady(child) {
  * to their closed-for-good values on entry, regardless of the exact caller
  * or code path that reached this state. Does not interfere with
  * expectedRecoveryExitChild-based exit suppression (a separate mechanism) -
- * a later real exit from a detached zombie is still correctly handled. */
+ * a later real exit from a detached zombie is still correctly handled.
+ *
+ * Turn-3 correction (Codex turn-2 finding): this used to call
+ * hooks.fatalNative(), whose real production implementation presents a
+ * Quit-only native dialog and then unconditionally calls terminateBackend()
+ * (not terminateAllKnownChildren()) and app.quit() - silently replacing the
+ * intended persistent unavailable state (usable Show/Exit tray entries, an
+ * unconfirmed child retried on the way out) with the ordinary quit-on-ack
+ * fatal lifecycle, and never retrying unconfirmedChild before the app
+ * disappears. This state must instead stay alive and interactive: show and
+ * focus the main window, present the non-dismissible fatal renderer error
+ * panel directly (never fatalNative's native dialog), and leave quitting to
+ * requestAppQuit() alone - the only path that awaits
+ * terminateAllKnownChildren() (including a retry against unconfirmedChild)
+ * before the app actually exits. */
 function enterBackendUnavailable(code, unconfirmedChild = null) {
   clearBackendTeardownDeadline();
   supervisorState.pythonProcess = null;
@@ -226,9 +265,11 @@ function enterBackendUnavailable(code, unconfirmedChild = null) {
     supervisorState.unconfirmedTerminationChild = unconfirmedChild;
   }
 
-  supervisorState.hooks.sendToRenderer({ type: 'status', state: 'unavailable', text: 'Dictation unavailable — exit and restart the app' });
-  supervisorState.hooks.updateTrayStatus('unavailable', 'Dictation unavailable — exit and restart the app');
-  supervisorState.hooks.fatalNative(code, 'Dictation unavailable — exit and restart the app', { code });
+  const message = 'Dictation unavailable — exit and restart the app';
+  supervisorState.hooks.sendToRenderer({ type: 'status', state: 'unavailable', text: message });
+  supervisorState.hooks.updateTrayStatus('unavailable', message);
+  supervisorState.hooks.showAndFocusWindow();
+  supervisorState.hooks.sendAppError({ severity: 'fatal', code, message, detail: { code } });
 }
 
 // ---------- recovery orchestration ----------
@@ -383,6 +424,7 @@ module.exports = {
   spawnBackend,
   terminateBackend,
   terminateAllKnownChildren,
+  requestAppQuit,
   requestBackendRecovery,
   handleBackendEvent,
   markBackendReady,

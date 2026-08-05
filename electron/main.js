@@ -411,9 +411,13 @@ function buildTrayMenu(win) {
   items.push({ type: 'separator' });
   items.push({
     label: 'Exit', click: async () => {
-      appQuitting = true;
-      await backendSupervisor.terminateAllKnownChildren();
-      app.quit();
+      // Turn-3 correction (Codex turn-2 finding): routed through
+      // backendSupervisor.requestAppQuit() rather than inlining
+      // appQuitting/terminateAllKnownChildren/app.quit() here directly, so
+      // this is the exact same exit path enterBackendUnavailable()'s own
+      // persistent unavailable state relies on - one single, testable way
+      // out that always retries an unconfirmed child first.
+      await backendSupervisor.requestAppQuit();
     },
   });
   return Menu.buildFromTemplate(items);
@@ -558,6 +562,18 @@ function createWindow() {
     clearDeadlines,
     armDeadlines,
     resolveBackendLaunch: resolveBackendLaunchHook,
+    // Turn-3 correction (Codex turn-2 finding): enterBackendUnavailable()'s
+    // own persistent presentation, wired to the real Electron window/IPC
+    // surface instead of routing through fatalNative()'s quit-only dialog.
+    showAndFocusWindow: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    },
+    sendAppError: (payload) => sendAppError({ ...payload, logPath: LOG_PATH }),
+    setQuitting: () => { appQuitting = true; },
+    quitApp: () => { app.quit(); },
   });
   backendSupervisor.spawnBackend(win);
 
