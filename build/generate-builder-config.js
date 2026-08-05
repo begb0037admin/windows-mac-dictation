@@ -137,15 +137,32 @@ function main() {
     // login-item-logic.js/fatal-gate.js at runtime - omitting them from the
     // packaged app.asar would make the packaged app fail to launch with
     // MODULE_NOT_FOUND. Every module main.js actually loads must be listed.
-    files: ['main.js', 'preload.js', 'package.json', 'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js', 'single-instance-logic.js'],
+    // tray-icon-path.js/backend-recovery.js/backend-supervisor.js added for
+    // the CoreAudio stream-teardown/tray-icon fix - main.js require()s
+    // backend-supervisor.js (which itself requires backend-recovery.js) and
+    // tray-icon-path.js at real startup, on both platforms, so omitting any
+    // of them would make every packaged build fail to launch.
+    files: [
+      'main.js', 'preload.js', 'package.json',
+      'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js', 'single-instance-logic.js',
+      'tray-icon-path.js', 'backend-recovery.js', 'backend-supervisor.js',
+    ],
     extraResources: [
       { from: uiSource, to: 'ui', filter: ['index.html', 'app.js', 'styles.css', 'logo.svg'] },
       { from: backendSource, to: 'backend', filter: ['**/*'] },
       // Tray icon: nativeImage.createFromPath(process.execPath) does NOT
       // extract the icon embedded in the exe on Windows (that's not what
-      // the API does - it decodes actual image files), so the packaged
-      // app must ship icon.ico as a real resource and load it directly.
-      { from: path.join(repoRoot, 'electron', 'build'), to: 'icons', filter: ['icon.ico'] },
+      // the API does - it decodes actual image files), so the packaged app
+      // must ship a real icon resource and load it directly. Direct
+      // headless testing against this app's real Electron 43.2.0 runtime
+      // found icon.ico AND icon.icns both decode empty on macOS, while
+      // icon.png decodes fine at 1024x1024 - so macOS ships icon.png,
+      // Windows keeps the working icon.ico.
+      {
+        from: path.join(repoRoot, 'electron', 'build'),
+        to: 'icons',
+        filter: [args.platform === 'mac' ? 'icon.png' : 'icon.ico'],
+      },
       // Ships the build-info.json written above so the running app can
       // read its own version/commit/build-time via process.resourcesPath -
       // see electron/main.js's resolveBuildInfo().

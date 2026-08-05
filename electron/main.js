@@ -15,8 +15,7 @@
 // (SS11), and the runtime diagnostics sanitization boundary (SS15).
 
 const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
-const { spawn, spawnSync } = require('child_process');
-const readline = require('readline');
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -24,6 +23,8 @@ const { sanitizeStderrLine } = require('./diagnostics');
 const { applyAutostartToggle, reconcileLoginItemOnStartup } = require('./login-item-logic');
 const { FatalGate } = require('./fatal-gate');
 const { installSingleInstanceGuard } = require('./single-instance-logic');
+const { trayIconPath } = require('./tray-icon-path');
+const backendSupervisor = require('./backend-supervisor');
 
 const REPO_ROOT = path.join(__dirname, '..');
 
@@ -107,8 +108,12 @@ function resolveBackendCommand() {
 // ---------- fatal lifecycle (SS12/13) ----------
 
 let mainWindow = null;
-let pythonProcess = null;
 let tray = null;
+let trayWindow = null;
+// The current persistent tray status row (stopping/recovering/unavailable),
+// or null when idle - rebuilt into the tray menu by buildTrayMenu()
+// whenever updateTrayStatus() runs. `idle` always clears this.
+let currentTrayStatus = null;
 // The single module-level "fatal handling started" flag every section of
 // SS12/13 refers to - owned exclusively by fatalNative() via this FatalGate
 // (fatal-gate.js, unit-tested in isolation). No other function sets a flag
@@ -148,7 +153,8 @@ function onBackendTimeout(which) {
 function armDeadlines() {
   clearDeadlines();
   stoppedSendingCommands = false;
-  backendReady = false; // fresh tracking for this (re)spawned backend process
+  // backendReady itself now lives in backendSupervisor.supervisorState,
+  // already reset to false by spawnBackend() before this hook runs.
   progressTimer = setTimeout(() => onBackendTimeout('progress'), 30 * 1000);
   absoluteTimer = setTimeout(() => onBackendTimeout('absolute'), 10 * 60 * 1000);
 }
@@ -161,46 +167,19 @@ function armDeadlines() {
 // BACKEND_TIMEOUT 10 minutes after spawn regardless of activity, and a
 // merely-idle-for-30s session (nothing to report - no dictation in
 // progress) would spuriously hit the progress deadline too.
-let backendReady = false;
-
-function markBackendReady() {
-  backendReady = true;
-  clearDeadlines();
-}
+//
+// backendReady/terminateBackend/spawnBackend/markBackendReady themselves
+// now live in electron/backend-supervisor.js (see the sixteenth-eighteenth
+// handoff-review gaps under FINAL_BRIEF.md's "Electron recovery
+// integration") - this file wires real Electron-facing hooks to that
+// module instead of owning this state directly. resetProgressDeadline()
+// stays here since it's this pre-existing readiness-timeout feature's own
+// bookkeeping, unrelated to teardown recovery.
 
 function resetProgressDeadline() {
-  if (stoppedSendingCommands || backendReady) return;
+  if (stoppedSendingCommands || backendSupervisor.supervisorState.backendReady) return;
   if (progressTimer) clearTimeout(progressTimer);
   progressTimer = setTimeout(() => onBackendTimeout('progress'), 30 * 1000);
-}
-
-/** SS12.2's bounded termination procedure: normal termination first, then a
- * narrowly targeted process-tree kill if it doesn't die within 5s. Windows
- * uses `taskkill /t` scoped to this specific PID's tree only - never a
- * blanket kill of unrelated python/Electron processes (SS12.2 V10). */
-function terminateBackend() {
-  return new Promise((resolve) => {
-    if (!pythonProcess) return resolve();
-    const proc = pythonProcess;
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(forceTimer);
-      resolve();
-    };
-    proc.once('exit', finish);
-    try { proc.kill(); } catch (e) { /* already gone */ }
-    const forceTimer = setTimeout(() => {
-      if (settled) return;
-      if (process.platform === 'win32' && proc.pid) {
-        try { spawnSync('taskkill', ['/pid', String(proc.pid), '/t', '/f']); } catch (e) { /* best effort */ }
-      } else if (proc.pid) {
-        try { proc.kill('SIGKILL'); } catch (e) { /* best effort */ }
-      }
-      finish();
-    }, 5000);
-  });
 }
 
 /** SS13: async, idempotent (via fatalGate - fatal-gate.js). Every fatal
@@ -234,12 +213,12 @@ function fatalNative(code, message, detail) {
     } catch (e) {
       appendLog('exit', `showMessageBox rejected: ${sanitizeStderrLine(String(e && e.message))}`);
       appQuitting = true;
-      await terminateBackend();
+      await backendSupervisor.terminateBackend();
       app.quit();
       return;
     }
     appQuitting = true;
-    await terminateBackend();
+    await backendSupervisor.terminateBackend();
     app.quit();
   });
 }
@@ -261,8 +240,9 @@ function loginItemCtx() {
     getLoginItemSettings: () => app.getLoginItemSettings(),
     setLoginItemSettings: (opts) => app.setLoginItemSettings(opts),
     writeToBackend: (cmdObject) => {
-      if (pythonProcess && pythonProcess.stdin.writable) {
-        pythonProcess.stdin.write(`${JSON.stringify(cmdObject)}\n`);
+      const proc = backendSupervisor.supervisorState.pythonProcess;
+      if (proc && proc.stdin.writable) {
+        proc.stdin.write(`${JSON.stringify(cmdObject)}\n`);
       }
     },
     sendToRenderer,
@@ -290,8 +270,29 @@ function reconcileConfigOnStartup(configEvent) {
 }
 
 // ---------- backend process ----------
+//
+// spawnBackend/terminateBackend/the recovery state machine itself now live
+// in electron/backend-supervisor.js - this file wires real Electron-facing
+// hooks to it via initSupervisor() (called once, in createWindow() below)
+// and calls backendSupervisor.spawnBackend() to start it.
 
-function spawnBackend(win) {
+// The single point every backend stdout event passes through on its way to
+// the renderer. Wraps the pre-existing config-reconciliation/
+// resetProgressDeadline behavior (unrelated to this brief's recovery
+// design) around the real sendToRenderer() call, so both keep working
+// exactly as before despite living behind the new hooks boundary.
+function sendToRendererHook(evt) {
+  if (evt && (evt.type === 'status' || evt.type === 'config')) {
+    resetProgressDeadline();
+  }
+  let outEvt = evt;
+  if (evt && evt.type === 'config') {
+    outEvt = reconcileConfigOnStartup(evt);
+  }
+  sendToRenderer(outEvt);
+}
+
+function resolveBackendLaunchHook() {
   const { command, args, cwd } = resolveBackendCommand();
   const env = { ...process.env, PYTHONUNBUFFERED: '1' };
   if (app.isPackaged) {
@@ -304,76 +305,25 @@ function spawnBackend(win) {
     // resolve_config_path().
     env.P2T_CONFIG_DIR = app.getPath('userData');
   }
-
   // windowsHide: true (packaged only) is what actually hides the backend's
   // console window per FINAL_BRIEF.md - the exe itself stays a normal
   // console-subsystem build (push2talk-backend.win.spec: console=True,
   // corrected turn 3) so stdin/stdout redirection keeps working exactly as
   // observed in dev mode; only the visible window is suppressed, at spawn
-  // time, not by changing the executable's own subsystem. [VALIDATION V5,
-  // not yet live-verified on an installed copy - see i3_claude.md.]
-  const spawnOptions = { cwd, env };
-  if (app.isPackaged) spawnOptions.windowsHide = true;
+  // time, not by changing the executable's own subsystem.
+  return { command, args, cwd, env, windowsHide: !!app.isPackaged };
+}
 
-  let child;
-  try {
-    child = spawn(command, args, spawnOptions);
-  } catch (e) {
-    fatalNative('BACKEND_MISSING', 'The dictation backend could not be started.', {
-      error_class: e && e.constructor ? e.constructor.name : 'Error',
-    });
-    return null;
-  }
-  pythonProcess = child;
-
-  // Attach every listener before arming the deadlines - if a fast backend's
-  // first stdout line arrived before a timer existed to reset, that would
-  // be harmless (no timer yet to have expired); attaching listeners after
-  // arming would instead risk racing against however Node schedules the
-  // already-armed timer relative to stream 'data' events. Belt-and-braces
-  // ordering, not the actual fix for the timeout bug found live in this
-  // Electron process (see i1_claude.md) - kept because it is strictly safer
-  // regardless of that bug's real cause.
-  const rl = readline.createInterface({ input: child.stdout });
-  rl.on('line', async (line) => {
-    if (!line.trim()) return;
-    let evt;
-    try {
-      evt = JSON.parse(line);
-    } catch (e) {
-      appendLog('main', `malformed JSON from backend, skipping (len=${line.length})`);
-      return;
-    }
-    if (evt && evt.type === 'ready') {
-      markBackendReady();
-    } else if (evt && (evt.type === 'status' || evt.type === 'config')) {
-      resetProgressDeadline();
-    }
-    if (evt && evt.type === 'config') {
-      evt = reconcileConfigOnStartup(evt);
-    }
-    sendToRenderer(evt);
-  });
-
-  const errRl = readline.createInterface({ input: child.stderr });
-  errRl.on('line', (line) => appendLog('diag', sanitizeStderrLine(line)));
-
-  child.on('error', (err) => {
-    fatalNative('BACKEND_MISSING', 'The dictation backend could not be started.', {
-      error_class: err && err.constructor ? err.constructor.name : 'Error',
-    });
-  });
-
-  child.on('exit', (code) => {
-    if (pythonProcess === child) pythonProcess = null;
-    onBackendExit(code);
-  });
-
-  armDeadlines();
-  return child;
+function appendLogSanitized(prefix, line) {
+  appendLog(prefix, sanitizeStderrLine(line));
 }
 
 ipcMain.on('backend-command', (event, cmd) => {
+  if (!backendSupervisor.supervisorState.backendAcceptingCommands) {
+    appendLog('main', `rejected command while recovery/startup in progress: ${cmd && cmd.cmd}`);
+    return;
+  }
+  const pythonProcess = backendSupervisor.supervisorState.pythonProcess;
   if (cmd && cmd.cmd === 'save_config' && cmd.data && typeof cmd.data.alwaysOnTop === 'boolean') {
     // Applied live as a side effect; still forwarded through to Python
     // below (unlike autostart) since there's no readback value to
@@ -430,36 +380,70 @@ ipcMain.on('close-window', (event) => {
 function resolveTrayIconPath() {
   // nativeImage.createFromPath(process.execPath) does NOT work on Windows -
   // that API decodes actual image files, it does not extract the icon
-  // resource embedded in an exe (that silently produced an empty image,
-  // which is why the tray slot rendered blank while still registering a
-  // tooltip). Packaged: read the icon shipped as an extraResource
-  // (generate-builder-config.js). Dev mode: read the committed source file
-  // directly - present on disk, unpacked.
-  if (app.isPackaged) {
-    return nativeImage.createFromPath(path.join(process.resourcesPath, 'icons', 'icon.ico'));
+  // resource embedded in an exe. Platform-specific resolution (icon.png on
+  // darwin, icon.ico elsewhere) lives in tray-icon-path.js - direct
+  // headless testing against this app's real Electron 43.2.0 runtime on
+  // macOS found icon.ico AND icon.icns both decode empty; icon.png decodes
+  // fine at 1024x1024.
+  return trayIconPath({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    electronDir: __dirname,
+  });
+}
+
+/** Optionally prepends one disabled current-status row and separator (only
+ * while currentTrayStatus is set - stopping/recovering/unavailable), then
+ * preserves the existing Show/separator/Exit entries. */
+function buildTrayMenu(win) {
+  const items = [];
+  if (currentTrayStatus && currentTrayStatus.text) {
+    items.push({ label: currentTrayStatus.text, enabled: false });
+    items.push({ type: 'separator' });
   }
-  return nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.ico'));
+  items.push({
+    label: 'Show Push 2 Talk', click: () => {
+      win.show();
+      win.focus();
+    },
+  });
+  items.push({ type: 'separator' });
+  items.push({
+    label: 'Exit', click: async () => {
+      appQuitting = true;
+      await backendSupervisor.terminateAllKnownChildren();
+      app.quit();
+    },
+  });
+  return Menu.buildFromTemplate(items);
+}
+
+/** Updates the tooltip and rebuilds the tray menu. `idle` clears the
+ * transient status row; `stopping`, `recovering`, and the unavailable
+ * state remain visible in the menu until superseded by a later status. */
+function updateTrayStatus(state, text) {
+  if (state === 'idle') {
+    currentTrayStatus = null;
+  } else if (text) {
+    currentTrayStatus = { state, text };
+  }
+  if (!tray) return;
+  tray.setToolTip(currentTrayStatus ? `Push 2 Talk — ${currentTrayStatus.text}` : 'Push 2 Talk');
+  if (trayWindow) tray.setContextMenu(buildTrayMenu(trayWindow));
 }
 
 function createTray(win) {
-  const icon = resolveTrayIconPath();
-  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+  trayWindow = win;
+  const iconPath = resolveTrayIconPath();
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    fatalNative('TRAY_ICON_EMPTY', 'The application tray icon could not be loaded.', { code: 'TRAY_ICON_EMPTY' });
+    return;
+  }
+  tray = new Tray(icon);
   tray.setToolTip('Push 2 Talk');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    {
-      label: 'Show Push 2 Talk', click: () => {
-        win.show();
-        win.focus();
-      },
-    },
-    { type: 'separator' },
-    {
-      label: 'Exit', click: () => {
-        appQuitting = true;
-        app.quit();
-      },
-    },
-  ]));
+  tray.setContextMenu(buildTrayMenu(win));
   tray.on('click', () => {
     if (win.isVisible()) {
       win.hide();
@@ -559,8 +543,23 @@ function createWindow() {
   });
   win.loadFile(indexPath);
 
-  spawnBackend(win);
+  // Tray created before the backend is spawned - this guarantees backend
+  // status and recovery UI (updateTrayStatus()) have a visible tray target
+  // from the first event onward, closing R7 (recovery UI depending on a
+  // tray that might not exist yet).
   createTray(win);
+
+  backendSupervisor.initSupervisor(win, {
+    updateTrayStatus,
+    sendToRenderer: sendToRendererHook,
+    appendLog: appendLogSanitized,
+    fatalNative,
+    onBackendExit,
+    clearDeadlines,
+    armDeadlines,
+    resolveBackendLaunch: resolveBackendLaunchHook,
+  });
+  backendSupervisor.spawnBackend(win);
 
   // 'close' fires before the window is destroyed and can be cancelled,
   // unlike 'closed' below - hide instead of actually closing, unless the
@@ -575,9 +574,10 @@ function createWindow() {
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
-    if (pythonProcess) {
-      pythonProcess.kill();
-      pythonProcess = null;
+    const proc = backendSupervisor.supervisorState.pythonProcess;
+    if (proc) {
+      proc.kill();
+      backendSupervisor.supervisorState.pythonProcess = null;
     }
   });
 
@@ -596,9 +596,10 @@ if (isPrimaryInstance) {
 
 app.on('window-all-closed', () => {
   appQuitting = true;
-  if (pythonProcess) {
-    pythonProcess.kill();
-    pythonProcess = null;
+  const proc = backendSupervisor.supervisorState.pythonProcess;
+  if (proc) {
+    proc.kill();
+    backendSupervisor.supervisorState.pythonProcess = null;
   }
   if (process.platform !== 'darwin') app.quit();
 });
