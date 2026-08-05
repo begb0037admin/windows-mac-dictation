@@ -29,6 +29,7 @@ keystroke silently does nothing.
 """
 
 import ctypes
+import enum
 import json
 import os
 import platform
@@ -139,13 +140,48 @@ HOTKEY_DISPLAY = describe_hotkey(HOTKEY_NAME, HOTKEY)
 IDLE_STATUS = f"Hold {HOTKEY_DISPLAY} to record"
 hotkey_listener = None
 
+
+# ── Recording state machine ──
+#
+# Bounds an unbounded CoreAudio stream-teardown hang (a real, confirmed
+# failure mode: sd.InputStream.close() can hang indefinitely after an
+# occasional CoreAudio realtime-IO-thread deadline miss, with no timeout of
+# its own) and closes a real hotkey-acceptance race at startup. See
+# FINAL_BRIEF.md ("windows-mac-dictation: CoreAudio Stream-Teardown Hang &
+# macOS Tray Icon Fix") for the full design and every handoff-review gap
+# this closes.
+class RecordingState(enum.Enum):
+    INITIALIZING = "initializing"
+    IDLE = "idle"
+    STARTING = "starting"
+    RECORDING = "recording"
+    STOPPING = "stopping"
+
+
 state_lock = threading.Lock()
 transcribe_lock = threading.Lock()
-recording = False
+# Starts INITIALIZING, not IDLE: run_hotkey_listener() starts accepting real
+# OS hotkey events before this module tells Electron/the user it's ready
+# (emit_event({"type": "ready", ...})) - hotkeys are handled entirely inside
+# Python via pynput, never routed through Electron's own
+# backendAcceptingCommands gate (that only ever covers Electron-IPC-forwarded
+# commands). start_recording()'s existing "accept only if IDLE" check already
+# rejects INITIALIZING the same way it rejects STOPPING, closing this window
+# with no new special-casing needed. Transitions to IDLE in main(), in the
+# one exact spot documented there.
+recording_state = RecordingState.INITIALIZING
+start_cancel_requested = False
 frames = []
 stream = None
 partial_stop_event = None
 focus_target = None
+
+# Healthy teardown was observed within about one second; the confirmed hang
+# lasted 2m14s. Three seconds gives normal teardown roughly a 3x margin
+# while still bounding the failure.
+STREAM_TEARDOWN_TIMEOUT_S = 3.0
+STOPPING_STATUS = "Stopping..."
+RECOVERING_STATUS = "Recovering from an audio problem…"
 
 
 # ── Focus tracking ──
@@ -172,10 +208,16 @@ def capture_focus_target():
             result = subprocess.run(
                 ["osascript", "-e",
                  'tell application "System Events" to get name of first process whose frontmost is true'],
-                capture_output=True, text=True, timeout=2,
+                capture_output=True, text=True, timeout=2, check=True,
             )
             return result.stdout.strip() or None
-        except Exception:
+        except Exception as exc:
+            # check=True turns a nonzero osascript exit (e.g. denied
+            # AppleEvents automation permission) into a real exception
+            # instead of a silent empty stdout - surfaced structurally so a
+            # permission denial is diagnosable without ever blocking
+            # dictation itself (still returns None either way).
+            emit_diag("FOCUS_CAPTURE_FAILED", error_class=type(exc).__name__)
             return None
     return None
 
@@ -209,10 +251,13 @@ def restore_focus_target(target):
         try:
             subprocess.run(
                 ["osascript", "-e", f'tell application "{target}" to activate'],
-                timeout=2,
+                timeout=2, check=True, capture_output=True, text=True,
             )
         except Exception as exc:
-            print(f"[focus] failed to restore macOS focus: {exc}", file=sys.stderr)
+            emit_diag("FOCUS_RESTORE_FAILED", error_class=type(exc).__name__)
+            # Continue without raising - paste proceeds using the current
+            # fallback focus rather than being blocked by a focus-restore
+            # failure.
 
 
 # ── Event stream (Python -> Electron, stdout) ──
@@ -398,7 +443,13 @@ def audio_callback(indata, frame_count, time_info, status):
     if status:
         print(f"[audio] status: {status}", file=sys.stderr)
     with state_lock:
-        if recording:
+        # STARTING as well as RECORDING - a synchronous callback fired by
+        # sd.InputStream.start() itself must not be dropped (R3: ".start()
+        # emits callbacks before the code resets frames"). Rejects callbacks
+        # from a stream already detached (stream is None) after the
+        # transition to STOPPING, even if the underlying native callback
+        # fires once more before teardown actually completes.
+        if recording_state in (RecordingState.STARTING, RecordingState.RECORDING) and stream is not None:
             frames.append(indata.copy())
             rms = float(np.sqrt(np.mean(indata ** 2)))
             push_audio_level(rms)
@@ -439,6 +490,17 @@ def live_partial_transcription_enabled(whisper_config):
     return "large-v3-turbo" not in model_size and "large-v3-turbo" not in repo
 
 
+def emit_diag(code, **fields):
+    """Writes one structured P2T_DIAG line to stderr - electron/diagnostics.js
+    sanitizes it through DIAG_ALLOWED_KEYS before it ever reaches backend.log
+    or a native dialog, so only allowlisted keys (never exception messages or
+    transcript content) survive. `code` is always included; every extra
+    keyword becomes an allowlist-checked field."""
+    payload = {"code": code}
+    payload.update(fields)
+    print(f"P2T_DIAG {json.dumps(payload)}", file=sys.stderr)
+
+
 def log_stage_timing(code, started_at, char_count=None):
     """Emit content-free timings through Electron's diagnostic allowlist."""
     payload = {
@@ -477,7 +539,7 @@ def partial_transcription_loop(stop_event):
 
     while not stop_event.wait(PARTIAL_INTERVAL_SECONDS):
         with state_lock:
-            if not recording:
+            if recording_state != RecordingState.RECORDING:
                 return
             snapshot = list(frames)
         if not snapshot:
@@ -502,23 +564,157 @@ def partial_transcription_loop(stop_event):
             chunk_start = len(audio_so_far)
 
 
+def bounded_teardown_stream(local_stream, *, operation, call_stop):
+    """Runs stream.stop()/close() in a daemon worker thread, bounded by
+    STREAM_TEARDOWN_TIMEOUT_S, so a hung native close() (the confirmed real
+    failure mode - a CoreAudio realtime-IO-thread deadline miss can leave
+    close() hanging indefinitely with no timeout of its own) can never again
+    hang this process indefinitely. Returns True only on a confirmed close
+    within the timeout (even if stop() itself raised); False on a timeout or
+    a close() exception, in which case a recovery has already been
+    requested. The caller may enter IDLE only when this returns True."""
+    emit_event({"type": "stream_teardown", "phase": "started", "operation": operation})
+
+    stop_exc = []
+    close_exc = []
+
+    def worker():
+        if call_stop:
+            try:
+                local_stream.stop()
+            except Exception as exc:  # recorded separately, never fails teardown alone
+                stop_exc.append(exc)
+        try:
+            local_stream.close()
+        except Exception as exc:
+            close_exc.append(exc)
+
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
+    worker_thread.join(STREAM_TEARDOWN_TIMEOUT_S)
+
+    if worker_thread.is_alive():
+        emit_diag(
+            "STREAM_TEARDOWN_TIMEOUT",
+            operation=operation,
+            timeout_ms=int(STREAM_TEARDOWN_TIMEOUT_S * 1000),
+        )
+        push_status("recovering", RECOVERING_STATUS)
+        emit_event({"type": "backend_recovery_required", "code": "STREAM_TEARDOWN_TIMEOUT"})
+        return False
+
+    if close_exc:
+        emit_diag("STREAM_CLOSE_ERROR", operation=operation, error_class=type(close_exc[0]).__name__)
+        push_status("recovering", RECOVERING_STATUS)
+        emit_event({"type": "backend_recovery_required", "code": "STREAM_CLOSE_ERROR"})
+        return False
+
+    if stop_exc:
+        # stop() raising alone never fails teardown (close() is what
+        # actually matters), but it's still worth a non-fatal diagnostic.
+        emit_diag("STREAM_STOP_ERROR", operation=operation, error_class=type(stop_exc[0]).__name__)
+
+    emit_event({"type": "stream_teardown", "phase": "completed", "operation": operation})
+    return True
+
+
+def _finish_unsuccessful_start_teardown(confirmed):
+    """Shared terminal-state rule for start_recording()'s three teardown call
+    sites (cancelled_start, start_failure, post_start_cancelled). None of
+    these three paths ever produced a real completed recording, so a
+    confirmed close skips straight to IDLE rather than the stop-side
+    signal/transcribe/cleanup/paste pipeline. An unconfirmed close (timeout
+    or close exception) stays STOPPING - bounded_teardown_stream() has
+    already pushed 'recovering' and requested backend recovery."""
+    global recording_state
+    if confirmed:
+        with state_lock:
+            recording_state = RecordingState.IDLE
+        push_status("idle", IDLE_STATUS)
+
+
 def start_recording():
-    global recording, frames, stream, partial_stop_event, focus_target
-    focus_target = capture_focus_target()
+    global recording_state, frames, stream, partial_stop_event, focus_target, start_cancel_requested
+
     with state_lock:
-        if recording:
+        if recording_state == RecordingState.STOPPING:
+            push_status("stopping", STOPPING_STATUS)
             return
-        recording = True
+        if recording_state != RecordingState.IDLE:
+            # INITIALIZING, STARTING, or RECORDING - duplicate/ineligible
+            # presses are silently ignored, no focus capture or stream
+            # construction attempted.
+            return
+        recording_state = RecordingState.STARTING
         frames = []
-        stream = sd.InputStream(
+        stream = None
+        start_cancel_requested = False
+        partial_stop_event = threading.Event()
+        local_stop_event = partial_stop_event
+
+    focus_target_local = capture_focus_target()
+
+    try:
+        local_stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype="float32",
             callback=audio_callback,
         )
-        stream.start()
-        partial_stop_event = threading.Event()
-        local_stop_event = partial_stop_event
+    except Exception as exc:
+        with state_lock:
+            recording_state = RecordingState.IDLE
+        emit_diag("STREAM_CONSTRUCTION_FAILED", error_class=type(exc).__name__)
+        push_status("error", f"Could not start recording: {exc}")
+        return
+
+    with state_lock:
+        # Install the constructed stream while still STARTING - this makes
+        # frames/stream callback-ready before .start() is ever called.
+        stream = local_stream
+        if start_cancel_requested:
+            recording_state = RecordingState.STOPPING
+            stream = None
+            cancelled_before_start = True
+        else:
+            cancelled_before_start = False
+
+    if cancelled_before_start:
+        confirmed = bounded_teardown_stream(local_stream, operation="cancelled_start", call_stop=False)
+        _finish_unsuccessful_start_teardown(confirmed)
+        return
+
+    try:
+        local_stream.start()
+    except Exception as exc:
+        with state_lock:
+            recording_state = RecordingState.STOPPING
+            stream = None
+        emit_diag("STREAM_START_FAILED", error_class=type(exc).__name__)
+        confirmed = bounded_teardown_stream(local_stream, operation="start_failure", call_stop=True)
+        _finish_unsuccessful_start_teardown(confirmed)
+        return
+
+    with state_lock:
+        if start_cancel_requested:
+            recording_state = RecordingState.STOPPING
+            stream = None
+            cancelled_after_start = True
+        else:
+            focus_target = focus_target_local
+            recording_state = RecordingState.RECORDING
+            cancelled_after_start = False
+
+    if cancelled_after_start:
+        # .start() already succeeded, so unlike step 6's cancelled_before_start
+        # branch, the stream is actively running - call_stop=True actually
+        # invokes stop(), not just close().
+        confirmed = bounded_teardown_stream(local_stream, operation="post_start_cancelled", call_stop=True)
+        _finish_unsuccessful_start_teardown(confirmed)
+        return
+
+    # No code clears `frames` after .start() has begun - a synchronous
+    # callback fired during .start() itself must be preserved (R3).
     push_status("recording", "Listening...")
     push_transcript("")
     print("[rec] recording started")
@@ -623,23 +819,43 @@ def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
 
 
 def stop_recording():
-    global recording, stream
+    global recording_state, stream, start_cancel_requested
     pipeline_started_at = time.perf_counter()
+
     with state_lock:
-        if not recording:
+        if recording_state == RecordingState.INITIALIZING:
+            # Hotkey release raced module startup, before run_hotkey_listener()
+            # emitted "ready" and before start_recording() could ever have run.
+            # No-op: no state change, no stream ops, no cancellation mutation,
+            # no status/event/diag emission.
             return
-        recording = False
+        if recording_state == RecordingState.STARTING:
+            # start_recording() owns cleanup once construction/start
+            # returns - this only records the request and returns.
+            start_cancel_requested = True
+            push_status("stopping", STOPPING_STATUS)
+            return
+        if recording_state in (RecordingState.STOPPING, RecordingState.IDLE):
+            return
+        # RECORDING: atomically detach the stream and transition to STOPPING.
+        recording_state = RecordingState.STOPPING
         local_stream = stream
         stream = None
         local_stop_event = partial_stop_event
 
     if local_stop_event:
         local_stop_event.set()
-    if local_stream:
-        local_stream.stop()
-        local_stream.close()
+    push_status("stopping", STOPPING_STATUS)
+
+    confirmed = bounded_teardown_stream(local_stream, operation="stop_recording", call_stop=True)
+    if not confirmed:
+        # Timeout or close failure never transitions to IDLE -
+        # bounded_teardown_stream() has already pushed 'recovering' and
+        # requested backend recovery.
+        return
 
     with state_lock:
+        recording_state = RecordingState.IDLE
         captured = list(frames)
 
     if not captured:
@@ -950,6 +1166,17 @@ def main():
         )
 
     run_hotkey_listener()
+
+    # Exactly here - between run_hotkey_listener() and emit_event(ready), not
+    # tied to push_status("idle", ...) below - recording_state leaves
+    # INITIALIZING. The backend should genuinely be capable of accepting a
+    # hotkey by the moment it tells Electron/the user it's ready, not one
+    # line later. A hotkey landing before this point is received by pynput
+    # but produces no recording (start_recording()'s "accept only if IDLE"
+    # check rejects INITIALIZING the same way it rejects STOPPING).
+    global recording_state
+    with state_lock:
+        recording_state = RecordingState.IDLE
 
     emit_event({"type": "ready", "hotkey_raw": HOTKEY_NAME, "hotkey_display": HOTKEY_DISPLAY})
     push_status("idle", IDLE_STATUS)

@@ -381,6 +381,40 @@ body.pill-mode .app {
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
 }
 
+/* Bounded CoreAudio stream-teardown recovery states (FINAL_BRIEF.md):
+   'stopping' is a brief, expected transition; 'recovering' means the
+   backend is actively being replaced - both get an explicit amber
+   treatment, readable in both dark/light full view and pill mode, distinct
+   from the green (healthy)/cyan (processing)/red (error) states already
+   used elsewhere. */
+.app.state-stopping .status-light {
+  background: #f5a524;
+  box-shadow: 0 0 0 3px rgba(245, 165, 36, 0.2);
+}
+
+.app.state-recovering .status-light {
+  background: #f5a524;
+  box-shadow: 0 0 0 3px rgba(245, 165, 36, 0.25), 0 0 10px rgba(245, 165, 36, 0.3);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+#statusText {
+  font-size: 12px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app.state-error #statusText {
+  color: var(--accent-red);
+}
+
+.app.state-stopping #statusText,
+.app.state-recovering #statusText {
+  color: #f5a524;
+}
+
 @keyframes pulse-dot {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.3); opacity: 0.7; }

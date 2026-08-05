@@ -186,7 +186,7 @@ test('packaged app ships a build-info.json extraResource with version/commit/bui
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
-test('packaged app ships the tray icon as a real extraResource (not extracted from the exe)', () => {
+test('packaged app ships the tray icon as a real extraResource (not extracted from the exe) - Windows uses icon.ico', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-7';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
@@ -199,6 +199,39 @@ test('packaged app ships the tray icon as a real extraResource (not extracted fr
   assert.deepEqual(iconResource.filter, ['icon.ico']);
   assert.match(iconResource.from, /electron[\\/]build$/);
   fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('packaged app ships the tray icon as a real extraResource - macOS uses icon.png (icon.ico/icon.icns both decode empty on real Electron 43.2.0)', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-icon-mac';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+  const iconResource = config.extraResources.find((r) => r.to === 'icons');
+  assert.ok(iconResource);
+  assert.deepEqual(iconResource.filter, ['icon.png']);
+  assert.match(iconResource.from, /electron[\\/]build$/);
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('packaged app ships tray-icon-path.js, backend-recovery.js, and backend-supervisor.js on both platforms', () => {
+  const runId = 'test-run-supervisor-files';
+  for (const platform of ['win', 'mac']) {
+    const repoRoot = freshRepo();
+    fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+    const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+    const arch = platform === 'win' ? 'x64' : 'arm64';
+    const res = run(['--platform', platform, '--arch', arch, '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+    assert.equal(res.status, 0, res.stderr);
+    const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+    assert.ok(config.files.includes('tray-icon-path.js'), `${platform}: files must include tray-icon-path.js`);
+    assert.ok(config.files.includes('backend-recovery.js'), `${platform}: files must include backend-recovery.js`);
+    assert.ok(config.files.includes('backend-supervisor.js'), `${platform}: files must include backend-supervisor.js`);
+    assert.ok(config.files.includes('lifecycle-wiring.js'), `${platform}: files must include lifecycle-wiring.js`);
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test('packaged app includes the single-instance guard required by main.js', () => {

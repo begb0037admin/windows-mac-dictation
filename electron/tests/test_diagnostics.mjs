@@ -52,3 +52,8 @@ test('sanitization is deterministic (same input -> same hash)', () => {
   const b = sanitizeStderrLine('SomeError: identical message');
   assert.equal(a, b);
 });
+
+test('stream-teardown diagnostics: operation and timeout_ms pass through the allowlist', () => {
+  const out = sanitizeStderrLine('P2T_DIAG {"code":"STREAM_TEARDOWN_TIMEOUT","operation":"stop_recording","timeout_ms":3000}');
+  assert.equal(out, 'P2T_DIAG {"code":"STREAM_TEARDOWN_TIMEOUT","operation":"stop_recording","timeout_ms":3000}');
+});

@@ -8,7 +8,7 @@
 
 // ── State ──
 
-const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'pasting', 'error'];
+const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'pasting', 'error', 'stopping', 'recovering'];
 // audioLevels must be at least as long as the larger of the two bar counts
 // below (the pill reads it at index i*2, so it needs at least
 // PILL_BAR_COUNT*2 slots too) -- a mismatch here previously left the
@@ -30,6 +30,7 @@ function cacheDom() {
   dom = {
     app: document.querySelector('.app'),
     statusLight: document.getElementById('statusLight'),
+    statusText: document.getElementById('statusText'),
     captionText: document.getElementById('captionText'),
     hotkeyKey: document.getElementById('hotkeyKey'),
     waveform: document.getElementById('waveform'),
@@ -279,12 +280,14 @@ const PILL_STATUS_TEXT = {
   cleanup: 'Cleaning up…',
   pasting: 'Pasting…',
   error: 'Error',
+  stopping: 'Stopping…',
+  recovering: 'Recovering…',
 };
 
 /**
- * Called from Python to update the app state.
- * @param {string} state - One of: idle, recording, transcribing, cleanup, pasting, error
- * @param {string} text - Status text, shown as the status light's hover tooltip
+ * Called from Python/Electron to update the app state.
+ * @param {string} state - One of: idle, recording, transcribing, cleanup, pasting, error, stopping, recovering
+ * @param {string} text - Status text, shown as the status light's hover tooltip, the full-view status text, and (via PILL_STATUS_TEXT) the pill label
  */
 function updateStatus(state, text) {
   for (const s of STATES) {
@@ -294,7 +297,13 @@ function updateStatus(state, text) {
   currentState = state;
 
   if (dom.statusLight) dom.statusLight.title = text;
-  if (dom.pillStatus) dom.pillStatus.textContent = PILL_STATUS_TEXT[state] || '';
+  // Every supplied text is written to both the full status text and the
+  // appropriate pill label - PILL_STATUS_TEXT supplies the terse pill
+  // wording where one exists, falling back to the full text supplied by
+  // the caller (e.g. 'stopping'/'recovering' use the same short wording in
+  // both places, but this stays generic for any future state too).
+  if (dom.statusText) dom.statusText.textContent = text || '';
+  if (dom.pillStatus) dom.pillStatus.textContent = PILL_STATUS_TEXT[state] || (state === 'idle' ? '' : text || '');
 
   if (state === 'idle') {
     resetWaveform();
@@ -307,6 +316,11 @@ function updateStatus(state, text) {
     showFlash('✓ Pasted');
   }
 
+  // The existing four-second error auto-reset does not apply to
+  // 'recovering' - that state's duration is driven entirely by real
+  // backend-recovery events (a replacement backend's 'ready'), not a timer,
+  // so auto-resetting to idle after 4s would show a false "all clear"
+  // while a recovery could still genuinely be in progress.
   if (state === 'error') {
     setTimeout(() => {
       if (currentState === 'error') {
@@ -617,6 +631,11 @@ function handleBackendEvent(event) {
       break;
     case 'ready':
       setHotkeyDisplay(event.hotkey_raw, event.hotkey_display);
+      // A replacement backend's 'ready' (after a recovery, or the initial
+      // startup) is what actually clears 'recovering'/'stopping' - not a
+      // timer. The following normal 'idle' status event from main.py
+      // (main.py:954-955-equivalent) remains valid and idempotent.
+      updateStatus('idle', event.hotkey_display ? `Hold ${event.hotkey_display} to record` : 'Ready');
       break;
     case 'config':
       applyConfig(event);

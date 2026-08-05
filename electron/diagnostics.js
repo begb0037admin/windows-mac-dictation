@@ -9,6 +9,9 @@ const { createHash } = require('crypto');
 const DIAG_ALLOWED_KEYS = new Set([
   'code', 'url', 'error_class', 'char_count', 'duration_ms', 'deadline', 'exit_code',
   'requested', 'actual', 'rms_milli', 'peak_milli', 'active_percent',
+  // Added for the CoreAudio stream-teardown recovery design (STREAM_TEARDOWN_TIMEOUT/
+  // STREAM_CLOSE_ERROR/STREAM_STOP_ERROR diagnostics) - see FINAL_BRIEF.md.
+  'operation', 'timeout_ms',
 ]);
 
 function sanitizeUrl(raw) {
