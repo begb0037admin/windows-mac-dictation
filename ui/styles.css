@@ -812,6 +812,10 @@ body.pill-mode .flash.show {
   background: rgba(17, 24, 39, 0.85);
 }
 
+.app-error-panel.severity-permission {
+  background: rgba(17, 24, 39, 0.94);
+}
+
 .app-error-code {
   font-weight: 800;
   color: var(--accent-red);
@@ -831,7 +835,8 @@ body.pill-mode .flash.show {
   word-break: break-word;
 }
 
-.app-error-dismiss {
+.app-error-dismiss,
+.app-error-settings {
   display: none;
   margin-top: 4px;
   padding: 4px 10px;
@@ -841,6 +846,16 @@ body.pill-mode .flash.show {
   color: var(--ink);
   font-size: 12px;
   cursor: pointer;
+}
+
+.app-error-settings {
+  display: none;
+}
+
+.app-error-panel.severity-permission .app-error-settings {
+  display: inline-block;
+  background: var(--accent-blue);
+  color: white;
 }
 
 .app-error-panel.severity-warning .app-error-dismiss {

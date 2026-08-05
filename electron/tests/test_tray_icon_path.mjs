@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { trayIconFilename, trayIconPath } from '../tray-icon-path.js';
+import { prepareTrayIcon, trayIconFilename, trayIconPath } from '../tray-icon-path.js';
 
 test('trayIconFilename: darwin resolves to icon.png, every other platform to icon.ico', () => {
   assert.equal(trayIconFilename('darwin'), 'icon.png');
@@ -24,4 +24,19 @@ test('trayIconPath: Windows continues resolving ICO, dev and packaged', () => {
   assert.equal(dev, path.join('C:/repo/electron', 'build', 'icon.ico'));
   const packaged = trayIconPath({ platform: 'win32', isPackaged: true, resourcesPath: 'C:/res', electronDir: 'C:/repo/electron' });
   assert.equal(packaged, path.join('C:/res', 'icons', 'icon.ico'));
+});
+
+test('prepareTrayIcon: macOS resizes the 1024px source to menu-bar dimensions', () => {
+  const resizeCalls = [];
+  const source = {
+    isEmpty: () => false,
+    resize: (options) => { resizeCalls.push(options); return { prepared: true }; },
+  };
+  assert.deepEqual(prepareTrayIcon(source, 'darwin'), { prepared: true });
+  assert.deepEqual(resizeCalls, [{ width: 18, height: 18, quality: 'best' }]);
+});
+
+test('prepareTrayIcon: non-Mac platforms keep their original icon', () => {
+  const source = { isEmpty: () => false, resize: () => { throw new Error('must not resize'); } };
+  assert.equal(prepareTrayIcon(source, 'win32'), source);
 });

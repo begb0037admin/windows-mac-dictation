@@ -149,7 +149,7 @@ function main() {
     files: [
       'main.js', 'preload.js', 'package.json',
       'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js', 'single-instance-logic.js',
-      'tray-icon-path.js', 'backend-recovery.js', 'backend-supervisor.js', 'lifecycle-wiring.js',
+      'tray-icon-path.js', 'mac-permission-gate.js', 'backend-recovery.js', 'backend-supervisor.js', 'lifecycle-wiring.js',
     ],
     extraResources: [
       { from: uiSource, to: 'ui', filter: ['index.html', 'app.js', 'styles.css', 'logo.svg'] },

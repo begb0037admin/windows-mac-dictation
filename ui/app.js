@@ -61,6 +61,7 @@ function cacheDom() {
     appErrorCode: document.getElementById('appErrorCode'),
     appErrorMessage: document.getElementById('appErrorMessage'),
     appErrorDetail: document.getElementById('appErrorDetail'),
+    appErrorSettings: document.getElementById('appErrorSettings'),
     appErrorDismiss: document.getElementById('appErrorDismiss'),
   };
 }
@@ -355,14 +356,21 @@ function updateFinalText(text) {
 
 function handleAppError(payload) {
   if (!dom.appError || !payload) return;
+  if (payload.severity === 'clear') {
+    dom.appError.classList.remove('visible', 'severity-fatal', 'severity-warning', 'severity-permission');
+    return;
+  }
   const isFatal = payload.severity === 'fatal';
+  const isPermission = payload.severity === 'permission';
   dom.appErrorCode.textContent = payload.code || '';
   dom.appErrorMessage.textContent = payload.message || '';
-  dom.appErrorDetail.textContent = payload.detail ? JSON.stringify(payload.detail) : '';
-  dom.appError.classList.remove('severity-fatal', 'severity-warning');
-  dom.appError.classList.add(isFatal ? 'severity-fatal' : 'severity-warning');
+  dom.appErrorDetail.textContent = typeof payload.detail === 'string'
+    ? payload.detail
+    : (payload.detail ? JSON.stringify(payload.detail) : '');
+  dom.appError.classList.remove('severity-fatal', 'severity-warning', 'severity-permission');
+  dom.appError.classList.add(isFatal ? 'severity-fatal' : (isPermission ? 'severity-permission' : 'severity-warning'));
   dom.appError.classList.add('visible');
-  if (isFatal && isPillMode) disablePillMode();
+  if ((isFatal || isPermission) && isPillMode) disablePillMode();
 }
 
 // Sent once by main.js after the UI loads (electron/main.js's
@@ -674,6 +682,13 @@ function init() {
   }
   if (dom.appErrorDismiss) {
     dom.appErrorDismiss.addEventListener('click', dismissAppError);
+  }
+  if (dom.appErrorSettings) {
+    dom.appErrorSettings.addEventListener('click', () => {
+      if (window.electronAPI && window.electronAPI.openMacAccessibilitySettings) {
+        window.electronAPI.openMacAccessibilitySettings();
+      }
+    });
   }
 
   // Restore saved appearance early

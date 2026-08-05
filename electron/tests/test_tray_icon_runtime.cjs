@@ -16,6 +16,7 @@
 
 const path = require('path');
 const { app, nativeImage } = require('electron');
+const { prepareTrayIcon } = require('../tray-icon-path');
 
 async function main() {
   await app.whenReady();
@@ -25,11 +26,16 @@ async function main() {
     if (img.isEmpty()) {
       throw new Error(`icon.png decoded empty at ${pngPath}`);
     }
-    const size = img.getSize();
-    if (!(size.width > 0 && size.height > 0)) {
-      throw new Error(`icon.png decoded with non-positive dimensions: ${JSON.stringify(size)}`);
+    const sourceSize = img.getSize();
+    if (!(sourceSize.width > 0 && sourceSize.height > 0)) {
+      throw new Error(`icon.png decoded with non-positive dimensions: ${JSON.stringify(sourceSize)}`);
     }
-    process.stdout.write(`OK: icon.png decoded ${size.width}x${size.height} (Electron ${process.versions.electron})\n`);
+    const prepared = prepareTrayIcon(img, 'darwin');
+    const preparedSize = prepared.getSize();
+    if (preparedSize.width !== 18 || preparedSize.height !== 18) {
+      throw new Error(`macOS tray icon was not resized to 18x18: ${JSON.stringify(preparedSize)}`);
+    }
+    process.stdout.write(`OK: icon.png decoded ${sourceSize.width}x${sourceSize.height} and prepared ${preparedSize.width}x${preparedSize.height} (Electron ${process.versions.electron})\n`);
     process.exitCode = 0;
   } catch (err) {
     process.stderr.write(`FAIL: ${err.message}\n`);

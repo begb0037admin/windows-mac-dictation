@@ -1,12 +1,12 @@
 {
   "name": "push2talk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Push 2 Talk - push-to-talk voice dictation. Electron shell, spawns the Python backend (dev: system Python; packaged: frozen PyInstaller executable).",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test tests/test_diagnostics.mjs tests/test_login_item.mjs tests/test_fatal_lifecycle.mjs tests/test_single_instance.mjs tests/test_backend_recovery.mjs tests/test_tray_icon_path.mjs tests/test_recovery_orchestration.mjs tests/test_shutdown_coordinator.mjs",
+    "test": "node --test tests/test_diagnostics.mjs tests/test_login_item.mjs tests/test_fatal_lifecycle.mjs tests/test_single_instance.mjs tests/test_backend_recovery.mjs tests/test_tray_icon_path.mjs tests/test_mac_permission_gate.mjs tests/test_recovery_orchestration.mjs tests/test_shutdown_coordinator.mjs",
     "test:tray-runtime": "electron tests/test_tray_icon_runtime.cjs"
   },
   "devDependencies": {

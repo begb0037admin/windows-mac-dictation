@@ -24,4 +24,16 @@ function trayIconPath({ platform, isPackaged, resourcesPath, electronDir }) {
   return path.join(electronDir, 'build', filename);
 }
 
-module.exports = { trayIconFilename, trayIconPath };
+function prepareTrayIcon(image, platform) {
+  // macOS uses the image's logical size for the status item. Passing the
+  // committed 1024x1024 PNG directly makes the menu-bar item roughly 1024px
+  // wide and exposes a clipped blue/white strip across the top of the screen.
+  // Electron's documented macOS tray size is 16-22px; use 18px so the icon
+  // fits both compact and standard menu bars while preserving the PNG fix.
+  if (platform === 'darwin' && image && !image.isEmpty()) {
+    return image.resize({ width: 18, height: 18, quality: 'best' });
+  }
+  return image;
+}
+
+module.exports = { trayIconFilename, trayIconPath, prepareTrayIcon };

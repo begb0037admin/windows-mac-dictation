@@ -1079,16 +1079,16 @@ def check_macos_accessibility():
         return  # Can't preflight-check; existing docs/behaviour still apply
 
     if not CGPreflightListenEventAccess():
+        emit_diag("MAC_ACCESSIBILITY_REQUIRED")
         print(
-            "[main] Accessibility / Input Monitoring permission not granted — "
-            "the hotkey listener would silently receive no key events and "
-            "paste simulation would silently do nothing. Grant it under "
-            "System Settings > Privacy & Security > Accessibility (and Input "
-            "Monitoring) for Terminal / your Python interpreter, then restart "
-            "this app.",
+            "[main] macOS denied Accessibility permission to Push 2 Talk; "
+            "the Electron permission gate should prevent the backend from "
+            "starting until the visible app has been approved.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        # A dedicated exit code lets the Electron shell distinguish a TCC
+        # permission race from a genuine backend crash.
+        sys.exit(77)
 
 
 def run_build_self_test_mlx():

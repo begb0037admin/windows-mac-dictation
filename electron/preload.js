@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   moveWindowBy: (dx, dy) => ipcRenderer.send('move-window-by', dx, dy),
   resizeWindow: (width, height) => ipcRenderer.send('resize-window', width, height),
   closeWindow: () => ipcRenderer.send('close-window'),
+  openMacAccessibilitySettings: () => ipcRenderer.send('open-accessibility-settings'),
   sendCommand: (cmd) => ipcRenderer.send('backend-command', cmd),
   onBackendEvent: (callback) => {
     ipcRenderer.on('backend-event', (_event, data) => callback(data));

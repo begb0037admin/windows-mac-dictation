@@ -14,7 +14,7 @@
 // push2talk-packaging run), the login-item toggle/reconciliation contract
 // (SS11), and the runtime diagnostics sanitization boundary (SS15).
 
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, systemPreferences } = require('electron');
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +23,8 @@ const { sanitizeStderrLine } = require('./diagnostics');
 const { applyAutostartToggle, reconcileLoginItemOnStartup } = require('./login-item-logic');
 const { FatalGate } = require('./fatal-gate');
 const { installSingleInstanceGuard } = require('./single-instance-logic');
-const { trayIconPath } = require('./tray-icon-path');
+const { prepareTrayIcon, trayIconPath } = require('./tray-icon-path');
+const { createMacPermissionGate } = require('./mac-permission-gate');
 const backendSupervisor = require('./backend-supervisor');
 const { createQuitEntryWiring, createFatalCoordinator } = require('./lifecycle-wiring');
 
@@ -111,6 +112,7 @@ function resolveBackendCommand() {
 let mainWindow = null;
 let tray = null;
 let trayWindow = null;
+let macPermissionGate = null;
 // The current persistent tray status row (stopping/recovering/unavailable),
 // or null when idle - rebuilt into the tray menu by buildTrayMenu()
 // whenever updateTrayStatus() runs. `idle` always clears this.
@@ -381,6 +383,14 @@ ipcMain.on('close-window', (event) => {
   if (win) win.close();
 });
 
+ipcMain.on('open-accessibility-settings', () => {
+  if (macPermissionGate) {
+    macPermissionGate.openAccessibilitySettings().catch((error) => {
+      appendLog('main', `failed to open Accessibility settings: ${error && error.constructor ? error.constructor.name : 'Error'}`);
+    });
+  }
+});
+
 // ---------- System tray ----------
 // Kevin: closing the window (X, the in-app close button, or Alt+F4) should
 // hide to tray, not quit - the app is only fully closed via the tray's own
@@ -452,7 +462,7 @@ function updateTrayStatus(state, text) {
 function createTray(win) {
   trayWindow = win;
   const iconPath = resolveTrayIconPath();
-  const icon = nativeImage.createFromPath(iconPath);
+  const icon = prepareTrayIcon(nativeImage.createFromPath(iconPath), process.platform);
   if (icon.isEmpty()) {
     fatalNative('TRAY_ICON_EMPTY', 'The application tray icon could not be loaded.', { code: 'TRAY_ICON_EMPTY' });
     return;
@@ -591,6 +601,7 @@ function createWindow() {
   });
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('app-version', resolveBuildInfo());
+    if (macPermissionGate) macPermissionGate.ensureBackendStarted();
   });
   win.loadFile(indexPath);
 
@@ -599,8 +610,16 @@ function createWindow() {
   // from the first event onward, closing R7 (recovery UI depending on a
   // tray that might not exist yet).
   createTray(win);
-
-  backendSupervisor.spawnBackend(win);
+  macPermissionGate = createMacPermissionGate({
+    platform: process.platform,
+    checkAccessibility: (prompt) => systemPreferences.isTrustedAccessibilityClient(prompt),
+    spawnBackend: () => backendSupervisor.spawnBackend(win),
+    sendAppError,
+    sendStatus: sendToRenderer,
+    updateTrayStatus,
+    openExternal: (url) => shell.openExternal(url),
+    appendLog,
+  });
 
   // 'close' fires before the window is destroyed and can be cancelled,
   // unlike 'closed' below - hide instead of actually closing, unless the
@@ -654,5 +673,6 @@ app.on('window-all-closed', () => {
 // app.quit() (fired once quitApp()'s hook calls
 // quitEntryWiring.markCleanupComplete() first) proceed without recursing.
 app.on('before-quit', (event) => {
+  if (macPermissionGate) macPermissionGate.dispose();
   quitEntryWiring.beforeQuit(event);
 });

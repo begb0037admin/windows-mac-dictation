@@ -216,7 +216,7 @@ test('packaged app ships the tray icon as a real extraResource - macOS uses icon
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
-test('packaged app ships tray-icon-path.js, backend-recovery.js, and backend-supervisor.js on both platforms', () => {
+test('packaged app ships tray, permission-gate, recovery, and supervisor modules on both platforms', () => {
   const runId = 'test-run-supervisor-files';
   for (const platform of ['win', 'mac']) {
     const repoRoot = freshRepo();
@@ -227,6 +227,7 @@ test('packaged app ships tray-icon-path.js, backend-recovery.js, and backend-sup
     assert.equal(res.status, 0, res.stderr);
     const config = JSON.parse(fs.readFileSync(output, 'utf8'));
     assert.ok(config.files.includes('tray-icon-path.js'), `${platform}: files must include tray-icon-path.js`);
+    assert.ok(config.files.includes('mac-permission-gate.js'), `${platform}: files must include mac-permission-gate.js`);
     assert.ok(config.files.includes('backend-recovery.js'), `${platform}: files must include backend-recovery.js`);
     assert.ok(config.files.includes('backend-supervisor.js'), `${platform}: files must include backend-supervisor.js`);
     assert.ok(config.files.includes('lifecycle-wiring.js'), `${platform}: files must include lifecycle-wiring.js`);
