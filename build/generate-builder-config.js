@@ -142,10 +142,14 @@ function main() {
     // backend-supervisor.js (which itself requires backend-recovery.js) and
     // tray-icon-path.js at real startup, on both platforms, so omitting any
     // of them would make every packaged build fail to launch.
+    // lifecycle-wiring.js added for the Turn-5 shutdown-coordinator binding
+    // checklist - main.js require()s it at real startup too (tray Exit/
+    // fatalNative/before-quit/window-all-closed wiring); same failure mode
+    // if omitted.
     files: [
       'main.js', 'preload.js', 'package.json',
       'diagnostics.js', 'login-item-logic.js', 'fatal-gate.js', 'single-instance-logic.js',
-      'tray-icon-path.js', 'backend-recovery.js', 'backend-supervisor.js',
+      'tray-icon-path.js', 'backend-recovery.js', 'backend-supervisor.js', 'lifecycle-wiring.js',
     ],
     extraResources: [
       { from: uiSource, to: 'ui', filter: ['index.html', 'app.js', 'styles.css', 'logo.svg'] },

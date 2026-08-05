@@ -823,6 +823,12 @@ def stop_recording():
     pipeline_started_at = time.perf_counter()
 
     with state_lock:
+        if recording_state == RecordingState.INITIALIZING:
+            # Hotkey release raced module startup, before run_hotkey_listener()
+            # emitted "ready" and before start_recording() could ever have run.
+            # No-op: no state change, no stream ops, no cancellation mutation,
+            # no status/event/diag emission.
+            return
         if recording_state == RecordingState.STARTING:
             # start_recording() owns cleanup once construction/start
             # returns - this only records the request and returns.

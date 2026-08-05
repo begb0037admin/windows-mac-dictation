@@ -229,6 +229,7 @@ test('packaged app ships tray-icon-path.js, backend-recovery.js, and backend-sup
     assert.ok(config.files.includes('tray-icon-path.js'), `${platform}: files must include tray-icon-path.js`);
     assert.ok(config.files.includes('backend-recovery.js'), `${platform}: files must include backend-recovery.js`);
     assert.ok(config.files.includes('backend-supervisor.js'), `${platform}: files must include backend-supervisor.js`);
+    assert.ok(config.files.includes('lifecycle-wiring.js'), `${platform}: files must include lifecycle-wiring.js`);
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }
 });

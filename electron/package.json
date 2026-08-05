@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test tests/test_diagnostics.mjs tests/test_login_item.mjs tests/test_fatal_lifecycle.mjs tests/test_single_instance.mjs tests/test_backend_recovery.mjs tests/test_tray_icon_path.mjs tests/test_recovery_orchestration.mjs",
+    "test": "node --test tests/test_diagnostics.mjs tests/test_login_item.mjs tests/test_fatal_lifecycle.mjs tests/test_single_instance.mjs tests/test_backend_recovery.mjs tests/test_tray_icon_path.mjs tests/test_recovery_orchestration.mjs tests/test_shutdown_coordinator.mjs",
     "test:tray-runtime": "electron tests/test_tray_icon_runtime.cjs"
   },
   "devDependencies": {

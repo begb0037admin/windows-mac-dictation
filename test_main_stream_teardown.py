@@ -308,6 +308,29 @@ class DuplicatePressTests(StreamTeardownTestCase):
         self.assertEqual(main.recording_state, main.RecordingState.INITIALIZING)
         self.assertEqual(main.frames, [])
 
+    def test_case12b_release_during_initializing_is_a_no_op(self):
+        main.recording_state = main.RecordingState.INITIALIZING
+        fake_stream = FakeStream()
+        main.stream = fake_stream
+        stop_event = threading.Event()
+        main.partial_stop_event = stop_event
+        main.start_cancel_requested = False
+
+        with mock.patch.object(main, "bounded_teardown_stream") as mock_teardown:
+            main.stop_recording()
+
+        self.assertEqual(main.recording_state, main.RecordingState.INITIALIZING)
+        self.assertIs(main.stream, fake_stream)
+        self.assertIs(main.partial_stop_event, stop_event)
+        self.assertFalse(main.start_cancel_requested)
+        self.assertEqual(fake_stream.stop_calls, 0)
+        self.assertEqual(fake_stream.close_calls, 0)
+        mock_teardown.assert_not_called()
+        self.assertFalse(stop_event.is_set())
+        self.mock_push_status.assert_not_called()
+        self.mock_emit_event.assert_not_called()
+        self.mock_emit_diag.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

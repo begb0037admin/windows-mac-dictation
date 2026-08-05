@@ -25,6 +25,7 @@ const { FatalGate } = require('./fatal-gate');
 const { installSingleInstanceGuard } = require('./single-instance-logic');
 const { trayIconPath } = require('./tray-icon-path');
 const backendSupervisor = require('./backend-supervisor');
+const { createQuitEntryWiring, createFatalCoordinator } = require('./lifecycle-wiring');
 
 const REPO_ROOT = path.join(__dirname, '..');
 
@@ -127,6 +128,18 @@ let stoppedSendingCommands = false;
 let lastKnownAutostart = false;
 const isPrimaryInstance = installSingleInstanceGuard(app, () => mainWindow);
 
+// Turn-5 binding checklist: the primary-process quit-entry wiring (tray
+// Exit, window-all-closed, before-quit) and the fatalNative() coordinator
+// shell, built from the pure, import-safe lifecycle-wiring.js module so
+// tests can invoke these exact same callback objects. Every entry funnels
+// into backendSupervisor.requestAppQuit() - the one idempotent shutdown
+// coordinator - so this file never independently guards its own second
+// quit path.
+const quitEntryWiring = createQuitEntryWiring({
+  requestAppQuit: () => backendSupervisor.requestAppQuit(),
+  platform: process.platform,
+});
+
 function sendToRenderer(event) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('backend-event', event);
@@ -182,46 +195,45 @@ function resetProgressDeadline() {
   progressTimer = setTimeout(() => onBackendTimeout('progress'), 30 * 1000);
 }
 
-/** SS13: async, idempotent (via fatalGate - fatal-gate.js). Every fatal
- * condition in this file (UI_MISSING, UI_LOAD_FAILED, BACKEND_MISSING,
- * BACKEND_EXIT, BACKEND_TIMEOUT) calls this exactly once and lets the
- * gate's idempotency absorb any race. */
-function fatalNative(code, message, detail) {
-  return fatalGate.claim(async () => {
-    appendLog('exit', `FATAL ${code}: ${message}${detail ? ` ${sanitizeStderrLine(`P2T_DIAG ${JSON.stringify({ code, ...detail })}`)}` : ''}`);
+/** SS13 / Turn-5 binding checklist item 3: presents the fatal renderer
+ * panel + native dialog for one fatal condition, then always routes to the
+ * single shutdown coordinator (backendSupervisor.requestAppQuit()) -
+ * whether the dialog resolved normally or its promise rejected - instead of
+ * inlining its own appQuitting/terminate/app.quit() sequence. The
+ * fatalCoordinator (lifecycle-wiring.js) owns that routing and the
+ * fatalGate idempotency; this function only supplies the genuinely
+ * Electron-only presentation step (renderer error panel + native
+ * dialog.showMessageBox). */
+async function presentFatalDialog(code, message, detail) {
+  appendLog('exit', `FATAL ${code}: ${message}${detail ? ` ${sanitizeStderrLine(`P2T_DIAG ${JSON.stringify({ code, ...detail })}`)}` : ''}`);
 
-    const rendererLive = mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isLoadingMainFrame();
-    if (rendererLive) {
-      try {
-        sendAppError({ severity: 'fatal', code, message, detail: detail || null, logPath: LOG_PATH });
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      } catch (e) { /* renderer gone - the native dialog below still shows */ }
-    }
-
-    const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const rendererLive = mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isLoadingMainFrame();
+  if (rendererLive) {
     try {
-      const boxOptions = {
-        type: 'error',
-        title: `Push 2 Talk — ${code}`,
-        message,
-        detail: `${detail ? `${JSON.stringify(detail)}\n\n` : ''}Log: ${LOG_PATH}`,
-        buttons: ['Quit'],
-        noLink: true,
-      };
-      if (owner) await dialog.showMessageBox(owner, boxOptions);
-      else await dialog.showMessageBox(boxOptions);
-    } catch (e) {
-      appendLog('exit', `showMessageBox rejected: ${sanitizeStderrLine(String(e && e.message))}`);
-      appQuitting = true;
-      await backendSupervisor.terminateBackend();
-      app.quit();
-      return;
-    }
-    appQuitting = true;
-    await backendSupervisor.terminateBackend();
-    app.quit();
-  });
+      sendAppError({ severity: 'fatal', code, message, detail: detail || null, logPath: LOG_PATH });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    } catch (e) { /* renderer gone - the native dialog below still shows */ }
+  }
+
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const boxOptions = {
+    type: 'error',
+    title: `Push 2 Talk — ${code}`,
+    message,
+    detail: `${detail ? `${JSON.stringify(detail)}\n\n` : ''}Log: ${LOG_PATH}`,
+    buttons: ['Quit'],
+    noLink: true,
+  };
+  if (owner) await dialog.showMessageBox(owner, boxOptions);
+  else await dialog.showMessageBox(boxOptions);
 }
+
+const { fatalNative } = createFatalCoordinator({
+  gate: fatalGate,
+  requestAppQuit: () => backendSupervisor.requestAppQuit(),
+  presentDialog: presentFatalDialog,
+  appendLog: (prefix, text) => appendLog(prefix, sanitizeStderrLine(text)),
+});
 
 function onBackendExit(code) {
   if (appQuitting) return; // application itself is already quitting - suppress BACKEND_EXIT
@@ -411,13 +423,13 @@ function buildTrayMenu(win) {
   items.push({ type: 'separator' });
   items.push({
     label: 'Exit', click: async () => {
-      // Turn-3 correction (Codex turn-2 finding): routed through
-      // backendSupervisor.requestAppQuit() rather than inlining
+      // Turn-3 correction (Codex turn-2 finding), now via quitEntryWiring
+      // (lifecycle-wiring.js, Turn-5 item 6) rather than inlining
       // appQuitting/terminateAllKnownChildren/app.quit() here directly, so
       // this is the exact same exit path enterBackendUnavailable()'s own
       // persistent unavailable state relies on - one single, testable way
       // out that always retries an unconfirmed child first.
-      await backendSupervisor.requestAppQuit();
+      await quitEntryWiring.trayExit();
     },
   });
   return Menu.buildFromTemplate(items);
@@ -498,6 +510,41 @@ function createWindow() {
   });
   mainWindow = win;
 
+  // Wired before any fatalNative()-capable code below (UI_MISSING,
+  // TRAY_ICON_EMPTY, etc.) so backendSupervisor's hooks - in particular
+  // setQuitting/quitApp, which the single shutdown coordinator
+  // (requestAppQuit()) always calls - are never still the module's default
+  // no-ops when an early-startup fatal condition fires before this used to
+  // run (moved earlier than the pre-existing createTray()/spawnBackend()
+  // call site below, which are otherwise unaffected).
+  backendSupervisor.initSupervisor(win, {
+    updateTrayStatus,
+    sendToRenderer: sendToRendererHook,
+    appendLog: appendLogSanitized,
+    fatalNative,
+    onBackendExit,
+    clearDeadlines,
+    armDeadlines,
+    resolveBackendLaunch: resolveBackendLaunchHook,
+    // Turn-3 correction (Codex turn-2 finding): enterBackendUnavailable()'s
+    // own persistent presentation, wired to the real Electron window/IPC
+    // surface instead of routing through fatalNative()'s quit-only dialog.
+    showAndFocusWindow: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    },
+    sendAppError: (payload) => sendAppError({ ...payload, logPath: LOG_PATH }),
+    setQuitting: () => { appQuitting = true; },
+    // markCleanupComplete() first: the coordinator's own final app.quit()
+    // call re-fires 'before-quit' synchronously-ish, and quitEntryWiring's
+    // beforeQuit() must see cleanup as already complete by then so it lets
+    // this exact call through instead of recursing back into
+    // requestAppQuit().
+    quitApp: () => { quitEntryWiring.markCleanupComplete(); app.quit(); },
+  });
+
   // Belt-and-suspenders: the constructor's hasShadow:false option should be
   // enough, but call it explicitly too in case that option doesn't fully
   // apply on this Electron/Windows combination.
@@ -553,28 +600,6 @@ function createWindow() {
   // tray that might not exist yet).
   createTray(win);
 
-  backendSupervisor.initSupervisor(win, {
-    updateTrayStatus,
-    sendToRenderer: sendToRendererHook,
-    appendLog: appendLogSanitized,
-    fatalNative,
-    onBackendExit,
-    clearDeadlines,
-    armDeadlines,
-    resolveBackendLaunch: resolveBackendLaunchHook,
-    // Turn-3 correction (Codex turn-2 finding): enterBackendUnavailable()'s
-    // own persistent presentation, wired to the real Electron window/IPC
-    // surface instead of routing through fatalNative()'s quit-only dialog.
-    showAndFocusWindow: () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    },
-    sendAppError: (payload) => sendAppError({ ...payload, logPath: LOG_PATH }),
-    setQuitting: () => { appQuitting = true; },
-    quitApp: () => { app.quit(); },
-  });
   backendSupervisor.spawnBackend(win);
 
   // 'close' fires before the window is destroyed and can be cancelled,
@@ -590,11 +615,14 @@ function createWindow() {
 
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
-    const proc = backendSupervisor.supervisorState.pythonProcess;
-    if (proc) {
-      proc.kill();
-      backendSupervisor.supervisorState.pythonProcess = null;
-    }
+    // Item 4, Turn-5 binding checklist: no direct child killing or
+    // pythonProcess = null mutation here - that would detach the backend
+    // process from supervisorState before the coordinated shutdown path
+    // (requestAppQuit() -> terminateAllKnownChildren()) can ever observe or
+    // terminate it. The window closing alone never implies the app itself
+    // is quitting (see the 'close' handler above and hide-to-tray) - actual
+    // quitting always goes through quitEntryWiring/requestAppQuit(), which
+    // terminates the real backend child itself.
   });
 
   return win;
@@ -610,12 +638,21 @@ if (isPrimaryInstance) {
   });
 }
 
+// Item 3/4, Turn-5 binding checklist: preserves existing macOS behavior
+// (window-all-closed alone never quits on darwin - quitEntryWiring.
+// windowAllClosed() is a no-op there); on non-mac platforms it routes
+// through the single shutdown coordinator instead of inlining its own
+// appQuitting/child-kill/app.quit() sequence.
 app.on('window-all-closed', () => {
-  appQuitting = true;
-  const proc = backendSupervisor.supervisorState.pythonProcess;
-  if (proc) {
-    proc.kill();
-    backendSupervisor.supervisorState.pythonProcess = null;
-  }
-  if (process.platform !== 'darwin') app.quit();
+  quitEntryWiring.windowAllClosed();
+});
+
+// Item 3, Turn-5 binding checklist: covers Dock, application-menu, OS quit
+// requests, and any external/direct app.quit() call - the one quit entry
+// the pre-existing wiring didn't cover at all. Prevents quitting while
+// cleanup is still in flight and lets the coordinator's own final
+// app.quit() (fired once quitApp()'s hook calls
+// quitEntryWiring.markCleanupComplete() first) proceed without recursing.
+app.on('before-quit', (event) => {
+  quitEntryWiring.beforeQuit(event);
 });

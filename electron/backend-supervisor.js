@@ -90,6 +90,13 @@ const supervisorState = {
   recoveryWindow: new RecoveryWindow(),
   mainWindow: null, // set once via initSupervisor()
   hooks: { ...DEFAULT_HOOKS }, // set once via initSupervisor(); a test supplying only some hooks does not lose the rest
+  // The single idempotent shutdown coordinator's in-flight promise (item 2,
+  // Turn-5 binding checklist). Set once by the first requestAppQuit() call;
+  // every concurrent or later call returns this same promise instead of
+  // re-running setQuitting()/terminateAllKnownChildren()/quitApp(), so
+  // exactly one final quit ever happens regardless of how many quit entries
+  // (tray Exit, fatalNative, before-quit, non-mac window-all-closed) fire.
+  quitPromise: null,
 };
 
 function initSupervisor(win, hooks) {
@@ -111,6 +118,7 @@ function resetSupervisorStateForTests() {
     recoveryWindow: new RecoveryWindow(),
     mainWindow: null,
     hooks: { ...DEFAULT_HOOKS },
+    quitPromise: null,
   });
 }
 
@@ -199,19 +207,30 @@ async function terminateAllKnownChildren() {
   ]);
 }
 
-/** The single, exclusive way this application ever actually quits (Turn-3
- * correction, Codex turn-2 finding). Every exit path - the tray's own Exit
- * item, and any native-dialog Quit button a caller retains elsewhere - must
+/** The single, exclusive, idempotent asynchronous shutdown coordinator
+ * (Turn-5 binding checklist item 2). Every primary-process quit entry -
+ * tray Exit, both branches of fatalNative(), non-mac window-all-closed, and
+ * the before-quit handler covering Dock/menu/OS/external app.quit() - must
  * route through this function rather than calling hooks.quitApp() directly,
  * so terminateAllKnownChildren() (including a retry against a still-tracked
  * unconfirmedTerminationChild left over from an earlier unconfirmed
  * termination) is always awaited first. Sets the quitting flag before
  * termination begins so any exit events observed during teardown are
- * correctly treated as expected. */
-async function requestAppQuit() {
-  supervisorState.hooks.setQuitting();
-  await terminateAllKnownChildren();
-  supervisorState.hooks.quitApp();
+ * correctly treated as expected.
+ *
+ * Idempotent: the first invocation creates supervisorState.quitPromise and
+ * runs the real sequence; every concurrent or later invocation (any number
+ * of overlapping quit entries) returns that exact same promise instead of
+ * re-running setQuitting()/terminateAllKnownChildren()/quitApp() - so
+ * exactly one final quit ever happens, never more. */
+function requestAppQuit() {
+  if (supervisorState.quitPromise) return supervisorState.quitPromise;
+  supervisorState.quitPromise = (async () => {
+    supervisorState.hooks.setQuitting();
+    await terminateAllKnownChildren();
+    supervisorState.hooks.quitApp();
+  })();
+  return supervisorState.quitPromise;
 }
 
 // ---------- readiness ----------
@@ -393,6 +412,13 @@ function spawnBackend(win, { spawnFn } = {}) {
 
   if (typeof child.on === 'function') {
     child.on('error', (err) => {
+      // Item 5, Turn-5 binding checklist: gate by current-child identity.
+      // A stale/detached child (e.g. a zombie left behind by an unconfirmed
+      // termination, or a child superseded by a later respawn) firing a
+      // late 'error' must be silently ignored - only the current child's
+      // error keeps the existing fatal behavior, routed through the single
+      // shutdown coordinator via fatalNative() below.
+      if (!shouldProcessChildEvent(child, supervisorState.pythonProcess)) return;
       supervisorState.hooks.fatalNative('BACKEND_MISSING', 'The dictation backend could not be started.', {
         error_class: err && err.constructor ? err.constructor.name : 'Error',
       });
