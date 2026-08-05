@@ -1,6 +1,6 @@
 {
   "name": "push2talk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Push 2 Talk - push-to-talk voice dictation. Electron shell, spawns the Python backend (dev: system Python; packaged: frozen PyInstaller executable).",
   "main": "main.js",
