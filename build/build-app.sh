@@ -177,6 +177,11 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 "$VENV_PYTHON" -m pip install --quiet --require-hashes -r "$RUNTIME_LOCK" || fail 2 "runtime lock install failed"
 
 (cd "$ELECTRON_DIR" && npm test) || fail 2 "npm test failed"
+# The tray runtime test uses Electron's real nativeImage implementation,
+# not a mock. It must run in the host desktop session so macOS image sizing
+# regressions (including a 1024px PNG stretching across the menu bar) fail
+# the package before PyInstaller or DMG creation.
+(cd "$ELECTRON_DIR" && npm run test:tray-runtime) || fail 2 "tray runtime test failed"
 "$VENV_PYTHON" -m pytest "$REPO_ROOT/build/tests" || fail 2 "pytest failed"
 # pytest only collects .py files - the builder-config/icon generator tests
 # are separate node --test invocations, not covered by either npm test
