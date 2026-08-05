@@ -39,22 +39,35 @@ def _paste_macos() -> None:
         CGEventPost(kCGHIDEventTap, event)
 
 
+def _copy_verified(text: str, attempts: int = 3) -> None:
+    """Put ``text`` on the clipboard and prove it is readable before paste."""
+    for _ in range(attempts):
+        pyperclip.copy(text)
+        if pyperclip.paste() == text:
+            return
+        time.sleep(0.05)
+    raise RuntimeError("clipboard did not contain the new dictation text")
+
+
 def inject(text: str) -> None:
-    """Copy text to the clipboard and simulate a paste at the cursor."""
+    """Copy text to the clipboard and simulate a paste at the cursor.
+
+    macOS intentionally leaves the dictation text on the clipboard. Quartz
+    queues the Command-V event for the target application, so restoring the
+    previous clipboard immediately after posting the event can race with the
+    target and paste stale text. Keeping the new text makes the operation
+    deterministic and also gives the user a manual Command-V fallback.
+    """
     if not text.strip():
         return
 
-    previous_clipboard = pyperclip.paste()
-    pyperclip.copy(text)
-    # Give the OS clipboard a moment to register the new content before the
-    # paste keystroke fires — without this, fast key-up-to-paste sequences
-    # can occasionally paste the previous clipboard contents instead.
-    time.sleep(0.05)
+    system = platform.system()
+    previous_clipboard = pyperclip.paste() if system != "Darwin" else None
+    _copy_verified(text)
 
-    if platform.system() == "Darwin":
+    if system == "Darwin":
         _paste_macos()
     else:
         pyautogui.hotkey("ctrl", "v")
-
-    time.sleep(0.05)
-    pyperclip.copy(previous_clipboard)
+        time.sleep(0.05)
+        pyperclip.copy(previous_clipboard)

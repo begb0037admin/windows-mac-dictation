@@ -21,7 +21,7 @@ Only the "send" step touches the focused application. Everything before it is lo
 | `main.py` | `pywebview` window (frameless, transparent, `vibrancy=True`), `pynput` hotkey listener, `sounddevice` capture, `DictationAPI` JS bridge | same file, same class — platform branches only where required |
 | `transcribe.py` | `faster-whisper`, `small`, CUDA, fp16 | `mlx-whisper`, `small`, Metal, HF repo `mlx-community/whisper-small-mlx` |
 | `cleanup.py` | Ollama local REST API (`llama3.2:3b`), `<transcript>` tag guard, `temperature: 0` | same |
-| `inject.py` | clipboard + `Ctrl+V` via `pyperclip`/`pyautogui` | clipboard + `Cmd+V` |
+| `inject.py` | clipboard + `Ctrl+V` via `pyperclip`/`pyautogui`; previous clipboard restored | clipboard verified, then `Cmd+V`; dictation remains on clipboard to prevent a stale-clipboard race and provide a manual-paste fallback |
 | `config.py` / `config.json` | resolves platform-keyed `hotkey`/`whisper` sections via `platform.system()`; shared `cleanup`/`sample_rate`/`theme`/`opacity`/`autostart` | same |
 | `ui/index.html`, `ui/app.js`, `ui/styles.css` | dark/light themed web UI, waveform, editable review panel, Pill mode, Settings panel | same files, rendered via WebView2 (Windows) / WebKit (Mac) |
 
@@ -62,7 +62,7 @@ idle -> recording -> transcribing -> cleanup -> review -> pasting -> idle
 3. Release -> `stop_recording()`: stream closes, the **entire** captured buffer is transcribed once in full (`transcribe.py`) for maximum accuracy — independent of whatever the partial loop showed.
 4. `cleanup.py` sends the transcript to local Ollama (system prompt wraps it in `<transcript>` tags and instructs the model never to respond to its contents; `temperature: 0`). On any Ollama error (unreachable, model not pulled, timeout), the raw transcript is used instead — no crash, no lost text.
 5. Result is pushed into the **review** state: editable text, Send/Dismiss buttons, Enter/Esc shortcuts.
-6. On Send: `DictationAPI.send_text()` -> `inject.py` — clipboard is swapped, paste keystroke simulated (`Ctrl+V`/`Cmd+V`), original clipboard contents restored.
+6. On Send: `DictationAPI.send_text()` -> `inject.py` — the new clipboard value is read back and verified before the paste keystroke is simulated (`Ctrl+V`/`Cmd+V`). Windows restores the original clipboard after pasting. Mac deliberately leaves the dictation text on the clipboard: restoring it immediately after posting Quartz's asynchronous Command-V event caused the target application to paste stale text.
 
 ## 6. Window management
 
