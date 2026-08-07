@@ -772,6 +772,14 @@ def _content_words(text: str) -> set:
 # case tried (observed ratio 0.0-0.25) does not.
 _MIN_VOCAB_OVERLAP = 0.35
 
+# Cleanup may add a few connective words for grammar, but generated answers
+# introduce vocabulary that was never spoken. Allow up to 40% of the cleaned
+# result's distinct non-filler words to be new. This keeps small legitimate
+# additions ("send report Sarah" -> "send the report to Sarah") while
+# rejecting answers that merely echo the original words inside a response
+# ("call John" -> "Okay, I'll call John for you").
+_MAX_NOVEL_VOCAB_RATIO = 0.40
+
 
 def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
     raw_stripped = raw.strip()
@@ -809,10 +817,22 @@ def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
     # little vocabulary with the raw transcript is an answer to it, not
     # an edit of it, regardless of length or shape.
     raw_words = _content_words(raw_stripped) - _FILLER_WORDS
+    cleaned_words = _content_words(cleaned_stripped) - _FILLER_WORDS
     if raw_words:
-        cleaned_words = _content_words(cleaned_stripped)
         overlap_ratio = len(raw_words & cleaned_words) / len(raw_words)
         if overlap_ratio < _MIN_VOCAB_OVERLAP:
+            return False
+
+    # The overlap check is recall-like: it only asks how much of the raw
+    # vocabulary survived. An answer can score perfectly by repeating all of
+    # the spoken words and surrounding them with invented content. Add the
+    # precision-side check as well: reject results where too much of the
+    # cleaned vocabulary was never present in the transcript. Run this even
+    # when raw_words is empty (an all-filler utterance), since any cleaned
+    # content words would necessarily be invented.
+    if cleaned_words:
+        novel_ratio = len(cleaned_words - raw_words) / len(cleaned_words)
+        if novel_ratio > _MAX_NOVEL_VOCAB_RATIO:
             return False
 
     return True
