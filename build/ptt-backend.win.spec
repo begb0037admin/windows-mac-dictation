@@ -85,7 +85,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='push2talk-backend',
+    name='ptt-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -105,5 +105,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='push2talk-backend',
+    name='ptt-backend',
 )

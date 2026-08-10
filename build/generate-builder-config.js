@@ -86,7 +86,7 @@ function main() {
     fatal(16, 'uninstall hook is blocked until bootstrap installation observation and hook validation are recorded');
   }
 
-  const backendSource = path.join(runRootReal, 'backend', 'push2talk-backend');
+  const backendSource = path.join(runRootReal, 'backend', 'ptt-backend');
   const outputDir = path.join(runRootReal, 'electron');
   const uiSource = path.join(repoRoot, 'ui');
 
@@ -125,8 +125,8 @@ function main() {
 
   // Steps 3-6: build the config object.
   const config = {
-    appId: 'com.lelitte.push2talk',
-    productName: 'Push 2 Talk',
+    appId: 'com.lelitte.ptt',
+    productName: 'PTT',
     directories: {
       // electron-builder resolves `output` relative to electron/package.json's
       // directory unless absolute - always pass an absolute path here so this
@@ -208,8 +208,8 @@ function main() {
       // it. Apple Events (osascript/System Events automation, also used
       // for paste/focus handling) does require NSAppleEventsUsageDescription.
       extendInfo: {
-        NSMicrophoneUsageDescription: 'Push 2 Talk requires microphone access to transcribe speech.',
-        NSAppleEventsUsageDescription: 'Push 2 Talk requires Apple Events access to paste transcribed text into other apps.',
+        NSMicrophoneUsageDescription: 'PTT requires microphone access to transcribe speech.',
+        NSAppleEventsUsageDescription: 'PTT requires Apple Events access to paste transcribed text into other apps.',
       },
     },
     nsis: {
@@ -218,7 +218,7 @@ function main() {
       allowToChangeInstallationDirectory: false,
       createDesktopShortcut: true,
       createStartMenuShortcut: true,
-      shortcutName: 'Push 2 Talk',
+      shortcutName: 'PTT',
     },
   };
   if (args.platform === 'win') delete config.mac; else delete config.win;

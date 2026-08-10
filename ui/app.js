@@ -1,4 +1,4 @@
-/* app.js — Frontend logic for the Push 2 Talk UI (Electron shell, talks to
+/* app.js — Frontend logic for the PTT UI (Electron shell, talks to
    main.py over the backend-event/backend-command IPC wired in preload.js;
    also keeps a pywebview.api fallback for the older non-Electron build).
    Manages the waveform visualisation, handles editing/sending transcripts,

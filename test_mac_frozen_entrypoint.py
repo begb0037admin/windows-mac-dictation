@@ -9,9 +9,9 @@ from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parent
-MAC_ENTRY = REPO_ROOT / "build" / "push2talk-backend.mac-entry.py"
-MAC_SPEC = REPO_ROOT / "build" / "push2talk-backend.mac.spec"
-WINDOWS_SPEC = REPO_ROOT / "build" / "push2talk-backend.win.spec"
+MAC_ENTRY = REPO_ROOT / "build" / "ptt-backend.mac-entry.py"
+MAC_SPEC = REPO_ROOT / "build" / "ptt-backend.mac.spec"
+WINDOWS_SPEC = REPO_ROOT / "build" / "ptt-backend.win.spec"
 
 
 def load_mac_entry():
@@ -44,9 +44,9 @@ class MacFrozenEntrypointTests(unittest.TestCase):
         mac_spec = MAC_SPEC.read_text(encoding="utf-8")
         windows_spec = WINDOWS_SPEC.read_text(encoding="utf-8")
 
-        self.assertIn("'push2talk-backend.mac-entry.py'", mac_spec)
+        self.assertIn("'ptt-backend.mac-entry.py'", mac_spec)
         self.assertIn("[os.path.join(REPO_ROOT, 'main.py')]", windows_spec)
-        self.assertNotIn("push2talk-backend.mac-entry.py", windows_spec)
+        self.assertNotIn("ptt-backend.mac-entry.py", windows_spec)
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ assert_generated_pair() {
 # so an unusable package can never advance to the human permission gate.
 assert_mac_signature() {
     local app_bundle="$1"
-    local backend_exe="$app_bundle/Contents/Resources/backend/push2talk-backend"
+    local backend_exe="$app_bundle/Contents/Resources/backend/ptt-backend"
     local app_signing_info
 
     codesign --verify --deep --strict --verbose=2 "$app_bundle" \
@@ -83,7 +83,7 @@ assert_mac_signature() {
 
     app_signing_info="$(codesign -dvvv "$app_bundle" 2>&1)" \
         || fail 19 "could not inspect packaged app signature: $app_bundle"
-    echo "$app_signing_info" | grep -q '^Identifier=com\.lelitte\.push2talk$' \
+    echo "$app_signing_info" | grep -q '^Identifier=com\.lelitte\.ptt$' \
         || fail 19 "packaged app signature has the wrong identifier"
     echo "$app_signing_info" | grep -q '^Signature=adhoc$' \
         || fail 19 "unsigned internal Mac package must use the explicit ad-hoc signing contract"
@@ -194,7 +194,7 @@ node --test "$REPO_ROOT/build/tests/test_generate_icon.mjs" || fail 2 "generate-
 
 # Step 12-13: require the frozen executable, smoke-test the real backend
 # protocol (mirrors build-app.ps1's get_config smoke test).
-FROZEN_EXE="$RUN_ROOT/backend/push2talk-backend/push2talk-backend"
+FROZEN_EXE="$RUN_ROOT/backend/ptt-backend/ptt-backend"
 if [ ! -x "$FROZEN_EXE" ]; then fail 12 "frozen backend executable missing or not executable: $FROZEN_EXE"; fi
 
 # MLX can initialize Python multiprocessing shared resources on macOS. Prove
@@ -275,7 +275,7 @@ node "$REPO_ROOT/build/generate-builder-config.js" \
 GENERATED_RUN_ID="$(node -e "console.log(require('$RUN_ROOT/generated/electron-builder.meta.json').runId)")"
 if [ "$GENERATED_RUN_ID" != "$RUN_ID" ]; then fail 11 "re-read metadata run ID does not match this invocation"; fi
 
-EXPECTED_BACKEND_SOURCE="$RUN_ROOT/backend/push2talk-backend"
+EXPECTED_BACKEND_SOURCE="$RUN_ROOT/backend/ptt-backend"
 EXPECTED_ELECTRON_OUTPUT="$RUN_ROOT/electron"
 
 # Step 17: validate the existing pair immediately before builder --dir.
@@ -284,22 +284,22 @@ assert_generated_pair "$GENERATED_CONFIG" "$RUN_ID" mac "$ARCH" "$EXPECTED_BACKE
     || fail 17 "electron-builder --dir failed"
 
 # Step 18-19: discover the unpacked .app (SS6.1/M11) via bounded structural
-# search - exactly one "Push 2 Talk.app" with a Contents/Resources
+# search - exactly one "PTT.app" with a Contents/Resources
 # directory, not an assumption about electron-builder's default output
 # directory name.
 APP_CANDIDATES=()
 while IFS= read -r app; do
     [ -n "$app" ] && [ -d "$app/Contents/Resources" ] && APP_CANDIDATES+=("$app")
-done < <(find "$RUN_ROOT/electron" -maxdepth 4 -type d -name 'Push 2 Talk.app' 2>/dev/null)
+done < <(find "$RUN_ROOT/electron" -maxdepth 4 -type d -name 'PTT.app' 2>/dev/null)
 if [ "${#APP_CANDIDATES[@]}" -eq 0 ]; then
-    fail 5 "no structurally valid unpacked Push 2 Talk.app found under $RUN_ROOT/electron"
+    fail 5 "no structurally valid unpacked PTT.app found under $RUN_ROOT/electron"
 fi
 if [ "${#APP_CANDIDATES[@]}" -gt 1 ]; then
     fail 6 "ambiguous unpacked output - found ${#APP_CANDIDATES[@]} structurally valid application bundles"
 fi
 APP_BUNDLE="${APP_CANDIDATES[0]}"
 RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
-for required in ui/index.html ui/app.js ui/styles.css ui/logo.svg backend/push2talk-backend backend/_internal/mlx/lib/mlx.metallib backend/_internal/mlx_whisper/assets/mel_filters.npz backend/_internal/mlx_whisper/assets/gpt2.tiktoken backend/_internal/mlx_whisper/assets/multilingual.tiktoken; do
+for required in ui/index.html ui/app.js ui/styles.css ui/logo.svg backend/ptt-backend backend/_internal/mlx/lib/mlx.metallib backend/_internal/mlx_whisper/assets/mel_filters.npz backend/_internal/mlx_whisper/assets/gpt2.tiktoken backend/_internal/mlx_whisper/assets/multilingual.tiktoken; do
     if [ ! -f "$RESOURCES_DIR/$required" ]; then
         fail 19 "packaged inventory missing: Contents/Resources/$required"
     fi
@@ -324,8 +324,8 @@ if [ "$SKIP_SMOKE_TEST" -eq 0 ]; then
     fi
     open "$APP_BUNDLE"
     sleep 3
-    APP_PID="$(pgrep -f "Push 2 Talk.app/Contents/MacOS/Push 2 Talk" | head -n1 || true)"
-    BACKEND_PID="$(pgrep -f "$RUN_ROOT/electron.*push2talk-backend" | head -n1 || true)"
+    APP_PID="$(pgrep -f "PTT.app/Contents/MacOS/PTT" | head -n1 || true)"
+    BACKEND_PID="$(pgrep -f "$RUN_ROOT/electron.*ptt-backend" | head -n1 || true)"
 
     echo ""
     echo "Check the running app now:"

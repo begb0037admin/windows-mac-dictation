@@ -2,7 +2,7 @@
 
 // Electron shell for windows-mac-dictation. Owns the window (frameless,
 // transparent, shaped via CSS) and spawns the Python backend (dev: `python
-// main.py`; packaged: the frozen push2talk-backend executable) as a child
+// main.py`; packaged: the frozen ptt-backend executable) as a child
 // process, speaking one JSON object per line over its stdio: the backend's
 // stdout is events (state/transcript/config/...) forwarded to the renderer
 // via 'backend-event'; the renderer's commands (send_text/dismiss/
@@ -97,7 +97,7 @@ function resolveBuildInfo() {
 function resolveBackendCommand() {
   if (app.isPackaged) {
     const backendDir = path.join(process.resourcesPath, 'backend');
-    const exeName = process.platform === 'darwin' ? 'push2talk-backend' : 'push2talk-backend.exe';
+    const exeName = process.platform === 'darwin' ? 'ptt-backend' : 'ptt-backend.exe';
     // cwd is the backend's own directory (corrected turn 3 - was
     // process.resourcesPath, the parent of it), matching where the frozen
     // --onedir build's _internal/ dependency tree actually lives.
@@ -220,7 +220,7 @@ async function presentFatalDialog(code, message, detail) {
   const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
   const boxOptions = {
     type: 'error',
-    title: `Push 2 Talk — ${code}`,
+    title: `PTT — ${code}`,
     message,
     detail: `${detail ? `${JSON.stringify(detail)}\n\n` : ''}Log: ${LOG_PATH}`,
     buttons: ['Quit'],
@@ -321,7 +321,7 @@ function resolveBackendLaunchHook() {
   }
   // windowsHide: true (packaged only) is what actually hides the backend's
   // console window per FINAL_BRIEF.md - the exe itself stays a normal
-  // console-subsystem build (push2talk-backend.win.spec: console=True,
+  // console-subsystem build (ptt-backend.win.spec: console=True,
   // corrected turn 3) so stdin/stdout redirection keeps working exactly as
   // observed in dev mode; only the visible window is suppressed, at spawn
   // time, not by changing the executable's own subsystem.
@@ -443,7 +443,7 @@ function buildTrayMenu(win) {
     items.push({ type: 'separator' });
   }
   items.push({
-    label: 'Show Push 2 Talk', click: () => {
+    label: 'Show PTT', click: () => {
       win.show();
       win.focus();
     },
@@ -473,7 +473,7 @@ function updateTrayStatus(state, text) {
     currentTrayStatus = { state, text };
   }
   if (!tray) return;
-  tray.setToolTip(currentTrayStatus ? `Push 2 Talk — ${currentTrayStatus.text}` : 'Push 2 Talk');
+  tray.setToolTip(currentTrayStatus ? `PTT — ${currentTrayStatus.text}` : 'PTT');
   if (trayWindow) tray.setContextMenu(buildTrayMenu(trayWindow));
 }
 
@@ -486,7 +486,7 @@ function createTray(win) {
     return;
   }
   tray = new Tray(icon);
-  tray.setToolTip('Push 2 Talk');
+  tray.setToolTip('PTT');
   tray.setContextMenu(buildTrayMenu(win));
   tray.on('click', () => {
     if (win.isVisible()) {

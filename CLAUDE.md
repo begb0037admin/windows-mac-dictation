@@ -3,7 +3,7 @@
 > Keep this file under 200 lines. Push details to linked docs.
 
 ## Identity
-- **Project:** Dictation — system-wide push-to-talk voice dictation assistant, **cross-platform: Windows and Mac**
+- **Project:** PTT — system-wide push-to-talk voice dictation assistant, **cross-platform: Windows and Mac** *(renamed from "Push 2 Talk" 2026-08-10 — see HANDOVER.md)*
 - **Purpose:** Hold a hotkey, speak naturally, release — cleaned-up text (fillers stripped, grammar fixed, meaning preserved) is shown for a quick review/edit, then pasted into whatever text box has focus on confirm (Enter/Send) — or discarded (Esc/Dismiss). Built for quick Teams messages and short chat-box text. One codebase, unified behaviour on both machines — added as a requirement 2026-07-09 (originally scoped Windows-only; see `docs/BUILD_BRIEF.md` §10).
 - **Owner:** Kevin Lelitte, Manager/Director HR Systems, University of Oxford
 - **Status:** **A replacement Mac Large V3 Turbo package was built on 2026-07-30 after live evidence exposed recursive PyInstaller resource-tracker children creating five dictation pipelines.** A Mac-only frozen entry point now calls `multiprocessing.freeze_support()` before importing the backend; the exact packaged tracker-diversion test passes. Installation and physical acceptance of this latest DMG remain. **Windows was deliberately untouched by this Mac-only repair.** Windows' installed Small-model build was confirmed working end-to-end on 2026-07-29; source already targets `large-v3-turbo`, so a future Windows/RTX 3070 build and acceptance test remains separate work. See `HANDOVER.md`. File transcription removed — it belongs to `meeting-transcriber`.

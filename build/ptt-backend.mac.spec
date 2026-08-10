@@ -3,7 +3,7 @@
 # single-file installer for a push-to-talk tool).
 #
 # UNVERIFIED (Decision 7, authored 2026-07-28 without Apple Silicon hardware
-# available): mirrors build/push2talk-backend.win.spec's structure, but:
+# available): mirrors build/ptt-backend.win.spec's structure, but:
 #   - no NVIDIA CUDA DLL bundling - transcribe.py's Mac path uses
 #     mlx-whisper (Metal-accelerated), not ctranslate2/faster-whisper, so
 #     there is no equivalent dynamic-load DLL problem to solve;
@@ -89,7 +89,7 @@ a = Analysis(
         os.path.join(
             REPO_ROOT,
             'build',
-            'push2talk-backend.mac-entry.py',
+            'ptt-backend.mac-entry.py',
         )
     ],
     pathex=[REPO_ROOT],
@@ -120,7 +120,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='push2talk-backend',
+    name='ptt-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -140,5 +140,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='push2talk-backend',
+    name='ptt-backend',
 )

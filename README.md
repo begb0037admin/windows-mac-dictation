@@ -1,4 +1,6 @@
-# Push 2 Talk
+# PTT
+
+*(Formerly "Push 2 Talk" — renamed 2026-08-10.)*
 
 Personal, system-wide voice dictation assistant for **Windows and Mac** — like Wispr or Eloquent, built from scratch with open components.
 
@@ -29,7 +31,7 @@ Electron shell (window, tray, hotkey UI) spawning a Python backend (audio, trans
 | Speech-to-text | `faster-whisper`, `small` model, CUDA + fp16 (RTX 3070) | `mlx-whisper`, `small` model, Metal-accelerated |
 | Text cleanup | Ollama local REST API (`llama3.2:3b`) | Same — Ollama auto-accelerates via Metal |
 | Text injection | Clipboard + simulated `Ctrl+V` | Clipboard + simulated `Cmd+V` |
-| Config | `config.json` (dev) / `%APPDATA%\push2talk\config.json` (packaged) — platform-keyed hotkey/whisper sections | same shape, macOS user data dir |
+| Config | `config.json` (dev) / `%APPDATA%\ptt\config.json` (packaged) — platform-keyed hotkey/whisper sections | same shape, macOS user data dir |
 
 Local-first: free, private, no API keys. See `ARCHITECTURE.md` for the full state machine/threading model and `docs/BUILD_BRIEF.md` for build history and rationale.
 
@@ -60,7 +62,7 @@ Hotkey (per platform), theme, window opacity, and always-on-top can all be chang
 .\build\build-app.ps1
 ```
 
-Produces a fresh NSIS installer under `build\out\<run-id>\electron\Push 2 Talk Setup 0.1.0.exe`. See `build/build-app.ps1`'s own comments and `HANDOVER.md` for known pitfalls (e.g. never background it with PowerShell's `*>&1` stream redirection — use `Start-Transcript` instead, see the 2026-07-29 session entry).
+Produces a fresh NSIS installer under `build\out\<run-id>\electron\PTT Setup 0.1.0.exe`. See `build/build-app.ps1`'s own comments and `HANDOVER.md` for known pitfalls (e.g. never background it with PowerShell's `*>&1` stream redirection — use `Start-Transcript` instead, see the 2026-07-29 session entry).
 
 ## Repo structure
 

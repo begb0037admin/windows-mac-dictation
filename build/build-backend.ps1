@@ -1,4 +1,4 @@
-# Freezes the Python backend into build/out/<RunId>/backend/push2talk-backend/
+# Freezes the Python backend into build/out/<RunId>/backend/ptt-backend/
 # using the locked build venv already created and populated by build-app.ps1
 # (steps 8-9). Never installs anything itself - a missing dependency here is
 # a bug in the caller's venv setup, not something to paper over silently.
@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 $runRoot = Join-Path $RepoRoot "build\out\$RunId"
 $backendOut = Join-Path $runRoot 'backend'
 $workDir = Join-Path $backendOut '_work'
-$specPath = Join-Path $RepoRoot 'build\push2talk-backend.win.spec'
+$specPath = Join-Path $RepoRoot 'build\ptt-backend.win.spec'
 
 if (-not (Test-Path $runRoot)) {
     throw "run directory does not exist: $runRoot (build-app.ps1 must create it first)"
@@ -39,7 +39,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller exited with code $LASTEXITCODE"
 }
 
-$exePath = Join-Path $backendOut 'push2talk-backend\push2talk-backend.exe'
+$exePath = Join-Path $backendOut 'ptt-backend\ptt-backend.exe'
 if (-not (Test-Path $exePath)) {
     throw "PyInstaller reported success but the expected executable is missing: $exePath"
 }

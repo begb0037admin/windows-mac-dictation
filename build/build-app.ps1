@@ -4,7 +4,7 @@
 #
 # RESOLVED (was an open issue as of turn 1, i1_claude.md has full diagnostics):
 # the packaged app's BACKEND_TIMEOUT was root-caused in turn 3 to PyInstaller's
-# console=False - fixed to console=True (push2talk-backend.win.spec) with
+# console=False - fixed to console=True (ptt-backend.win.spec) with
 # windowsHide:true at spawn time instead (electron/main.js), matching
 # FINAL_BRIEF.md's explicit requirement. Re-verified live: the frozen exe now
 # starts correctly from inside a real windowed Electron app.
@@ -167,7 +167,7 @@ if ($LASTEXITCODE -ne 0) { Fail 2 'generate-builder-config test failed' }
 # Step 12-13: require the frozen executable, smoke-test the real backend
 # protocol (turn 5/6: a bare ready-check doesn't prove the stdin command
 # channel works - send get_config and require a valid response).
-$FrozenExe = Join-Path $RunRoot 'backend\push2talk-backend\push2talk-backend.exe'
+$FrozenExe = Join-Path $RunRoot 'backend\ptt-backend\ptt-backend.exe'
 if (-not (Test-Path $FrozenExe)) { Fail 12 "frozen backend executable missing: $FrozenExe" }
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $FrozenExe
@@ -218,7 +218,7 @@ if ($LASTEXITCODE -ne 0) { Fail 11 'generate-builder-config.js failed' }
 $Meta = Get-Content (Join-Path $RunRoot 'generated\electron-builder.meta.json') | ConvertFrom-Json
 if ($Meta.runId -ne $RunId) { Fail 11 're-read metadata run ID does not match this invocation' }
 
-$ExpectedBackendSource = Join-Path $RunRoot 'backend\push2talk-backend'
+$ExpectedBackendSource = Join-Path $RunRoot 'backend\ptt-backend'
 $ExpectedElectronOutput = Join-Path $RunRoot 'electron'
 
 # Step 17: validate the existing pair immediately before builder --dir.
@@ -232,13 +232,13 @@ try {
 }
 
 # Step 18-19: discover the unpacked app (SS6.1) via bounded structural
-# search - exactly one "Push 2 Talk.exe" with a sibling resources
+# search - exactly one "PTT.exe" with a sibling resources
 # directory - not an assumption that output always has a top-level
 # "*-unpacked" directory name.
-$AppCandidates = @(Get-ChildItem (Join-Path $RunRoot 'electron') -File -Recurse -Filter 'Push 2 Talk.exe' -ErrorAction SilentlyContinue |
+$AppCandidates = @(Get-ChildItem (Join-Path $RunRoot 'electron') -File -Recurse -Filter 'PTT.exe' -ErrorAction SilentlyContinue |
     Where-Object { Test-Path (Join-Path $_.Directory.FullName 'resources') })
 if ($AppCandidates.Count -eq 0) {
-    Fail 5 "no structurally valid unpacked Push 2 Talk.exe found under $RunRoot\electron"
+    Fail 5 "no structurally valid unpacked PTT.exe found under $RunRoot\electron"
 }
 if ($AppCandidates.Count -gt 1) {
     Fail 6 "ambiguous unpacked output - found $($AppCandidates.Count) structurally valid application executables"
@@ -247,7 +247,7 @@ $AppExe = $AppCandidates[0]
 $UnpackedDir = $AppExe.Directory.FullName
 $ResourcesDir = Join-Path $UnpackedDir 'resources'
 $ExpectedUiFiles = @('app.js', 'index.html', 'logo.svg', 'styles.css')
-foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\push2talk-backend.exe')) {
+foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\ptt-backend.exe')) {
     if (-not (Test-Path (Join-Path $ResourcesDir $required))) {
         Fail 19 "packaged inventory missing: resources\$required"
     }
@@ -274,9 +274,9 @@ if (-not $SmokeSkipped) {
     Start-Sleep -Seconds 3
     # Turn 5/6: scope backend discovery to this specific launch's own child
     # process, not a global process-name lookup - a global lookup could
-    # match an unrelated push2talk-backend.exe from a different run.
+    # match an unrelated ptt-backend.exe from a different run.
     $BackendProcAtLaunch = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.ParentProcessId -eq $AppProc.Id -and $_.Name -eq 'push2talk-backend.exe' } |
+        Where-Object { $_.ParentProcessId -eq $AppProc.Id -and $_.Name -eq 'ptt-backend.exe' } |
         Select-Object -First 1
 
     Write-Host ''

@@ -37,14 +37,14 @@ function run(args) {
 test('V1: generates a valid config+metadata pair for a real run directory', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-1';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
 
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
   assert.ok(fs.existsSync(output));
   const config = JSON.parse(fs.readFileSync(output, 'utf8'));
-  assert.equal(config.appId, 'com.lelitte.push2talk');
+  assert.equal(config.appId, 'com.lelitte.ptt');
   assert.ok(config.extraResources[1].from.includes(runId));
 
   const metaPath = path.join(path.dirname(output), 'electron-builder.meta.json');
@@ -60,7 +60,7 @@ test('no temp file is left behind after a successful run (atomic rename)', () =>
   const repoRoot = freshRepo();
   const runId = 'test-run-2';
   const runDir = path.join(repoRoot, 'build', 'out', runId);
-  fs.mkdirSync(path.join(runDir, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(runDir, 'backend', 'ptt-backend'), { recursive: true });
   const generatedDir = path.join(runDir, 'generated');
   const output = path.join(generatedDir, 'electron-builder.json');
 
@@ -75,7 +75,7 @@ test('no temp file is left behind after a successful run (atomic rename)', () =>
 test('unverified uninstall hook is mechanically blocked', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-3';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
 
   const blocked = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'true']);
@@ -117,7 +117,7 @@ test('rejects an invalid platform value', () => {
 test('rejects output outside the active run prescribed generated path', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-4';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const wrongOutput = path.join(repoRoot, 'build', 'out', runId, 'wrong', 'electron-builder.json');
 
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', wrongOutput, '--include-uninstall-hook', 'false']);
@@ -130,21 +130,21 @@ test('rejects output outside the active run prescribed generated path', () => {
 test('generated Windows config fixes architecture, icons, and shortcuts', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-5';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
   const config = JSON.parse(fs.readFileSync(output, 'utf8'));
   assert.deepEqual(config.win.target, [{ target: 'nsis', arch: ['x64'] }]);
   assert.match(config.win.icon, /icon\.ico$/);
-  assert.equal(config.nsis.shortcutName, 'Push 2 Talk');
+  assert.equal(config.nsis.shortcutName, 'PTT');
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
 test('generated Mac config explicitly ad-hoc signs the complete app bundle', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-mac-signing';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -160,7 +160,7 @@ test('generated Mac config explicitly ad-hoc signs the complete app bundle', () 
 test('packaged app ships a build-info.json extraResource with version/commit/build-time', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-8';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -189,7 +189,7 @@ test('packaged app ships a build-info.json extraResource with version/commit/bui
 test('packaged app ships the tray icon as a real extraResource (not extracted from the exe) - Windows uses icon.ico', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-7';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -204,7 +204,7 @@ test('packaged app ships the tray icon as a real extraResource (not extracted fr
 test('packaged app ships the tray icon as a real extraResource - macOS uses icon.png (icon.ico/icon.icns both decode empty on real Electron 43.2.0)', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-icon-mac';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -220,7 +220,7 @@ test('packaged app ships tray, permission-gate, recovery, and supervisor modules
   const runId = 'test-run-supervisor-files';
   for (const platform of ['win', 'mac']) {
     const repoRoot = freshRepo();
-    fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
     const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
     const arch = platform === 'win' ? 'x64' : 'arm64';
     const res = run(['--platform', platform, '--arch', arch, '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
@@ -238,7 +238,7 @@ test('packaged app ships tray, permission-gate, recovery, and supervisor modules
 test('packaged app includes the single-instance guard required by main.js', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-single-instance';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -254,7 +254,7 @@ test('packaged app includes the single-instance guard required by main.js', () =
 test('interrupted-write simulation: a pre-existing corrupt output is fully replaced, not merged', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-6';
-  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'push2talk-backend'), { recursive: true });
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
   const generatedDir = path.join(repoRoot, 'build', 'out', runId, 'generated');
   fs.mkdirSync(generatedDir, { recursive: true });
   const output = path.join(generatedDir, 'electron-builder.json');
@@ -263,7 +263,7 @@ test('interrupted-write simulation: a pre-existing corrupt output is fully repla
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
   const config = JSON.parse(fs.readFileSync(output, 'utf8'));
-  assert.equal(config.appId, 'com.lelitte.push2talk');
+  assert.equal(config.appId, 'com.lelitte.ptt');
 
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });

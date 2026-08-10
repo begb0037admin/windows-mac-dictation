@@ -1139,7 +1139,7 @@ def check_macos_accessibility():
     if not CGPreflightListenEventAccess():
         emit_diag("MAC_ACCESSIBILITY_REQUIRED")
         print(
-            "[main] macOS denied Accessibility permission to Push 2 Talk; "
+            "[main] macOS denied Accessibility permission to PTT; "
             "the Electron permission gate should prevent the backend from "
             "starting until the visible app has been approved.",
             file=sys.stderr,

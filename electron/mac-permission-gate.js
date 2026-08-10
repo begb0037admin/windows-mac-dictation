@@ -4,9 +4,9 @@ const MAC_ACCESSIBILITY_SETTINGS_URL =
   'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 
 const REQUIRED_MESSAGE =
-  'Accessibility permission is required before Push 2 Talk can listen for the hotkey or paste text.';
+  'Accessibility permission is required before PTT can listen for the hotkey or paste text.';
 const REQUIRED_DETAIL =
-  'Open System Settings, enable Push 2 Talk under Privacy & Security > Accessibility, then return here. The app will start automatically when macOS confirms the permission.';
+  'Open System Settings, enable PTT under Privacy & Security > Accessibility, then return here. The app will start automatically when macOS confirms the permission.';
 
 /**
  * Keeps the Electron app alive while macOS Accessibility permission is
