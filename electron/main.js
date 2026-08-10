@@ -368,8 +368,26 @@ ipcMain.on('backend-command', (event, cmd) => {
 ipcMain.on('move-window-by', (event, dx, dy) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
-  const [x, y] = win.getPosition();
-  win.setPosition(x + Math.round(dx), y + Math.round(dy));
+  // Kevin (2026-08-10): dragging the pill/header on Windows was growing the
+  // window instead of just translating it. setPosition(x, y) supplies only
+  // the new origin and trusts Windows/Chromium to leave width/height alone -
+  // but a frameless, transparent BrowserWindow can have its bounds silently
+  // rescaled mid-drag on Windows (a known Electron/Chromium behavior when a
+  // window's bounds are recomputed against a per-monitor DPI scale factor,
+  // which setPosition() alone does not protect against the way a real OS-
+  // native title-bar drag would). Reading the full current bounds and
+  // reasserting width/height explicitly on every single move tick - not
+  // just x/y - makes this impossible: since this call is the only thing
+  // that ever changes the window's bounds while dragging, and it now always
+  // writes back the width/height it just read, size can never drift no
+  // matter what Windows does internally between calls.
+  const bounds = win.getBounds();
+  win.setBounds({
+    x: bounds.x + Math.round(dx),
+    y: bounds.y + Math.round(dy),
+    width: bounds.width,
+    height: bounds.height,
+  });
 });
 
 ipcMain.on('resize-window', (event, width, height) => {
