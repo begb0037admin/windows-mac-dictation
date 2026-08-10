@@ -876,3 +876,16 @@ Kevin confirmed after Step 1 was first built (Windows-only) that this needs to b
 ## Architecture and Key Constraints
 
 Moved to `ARCHITECTURE.md` (current component/threading/state-machine reference) and `CLAUDE.md` (hard rules/key constraints) — this section was leftover from this file's first commit and had gone stale (it still listed Steps 3–5 as "not yet built" long after they shipped, contradicting the status block at the top of this file). Removed 2026-07-26 as part of the documentation audit; see the session entry above — nothing here was unique, everything is preserved in `ARCHITECTURE.md`/`CLAUDE.md`/`docs/BUILD_BRIEF.md`.
+
+## FLAGGED 2026-08-10 (evening) — Possible regression: pill window ballooned into a huge circle
+
+Kevin reported "same problem again" with a screenshot showing the pill rendered as a large dark circle (roughly half-screen), not the normal small pill shape. By the time it was checked live moments later, the window was back to a normal size (700x630 physical px = 400x360 logical, correct Full-mode size) and hidden, so the blob state itself couldn't be captured live — not yet reproduced on demand.
+
+**Leading hypothesis, not yet confirmed:** the `ec36605` native-drag fix (`-webkit-app-region: drag` on `.header`/`.pill-bar`) makes Windows treat that region as a real OS-level title bar for hit-testing purposes — which by default still permits **double-click-to-maximize**, independent of `resizable: false`. `electron/main.js`'s `BrowserWindow` constructor (around line 479) sets `resizable: false` but does **not** set `maximizable: false`. A double-click (or Windows Snap gesture, e.g. Win+Up) on the native drag region could plausibly trigger a native maximize that ignores `resizable: false`, ballooning the window while pill-mode's rounded-corner CSS is still applied, producing a circular appearance if width/height end up similar.
+
+**Not yet verified — needs checking tomorrow:**
+1. Confirm `ui/styles.css`'s `.pill-bar` border-radius value (percentage vs fixed px) to confirm the "large + rounded = circle" mechanism.
+2. Try to reproduce via a real or synthetic double-click on the header/pill drag region, and via Win+Up snap-maximize, and check resulting window bounds live.
+3. If confirmed, fix is likely just adding `maximizable: false` to the `BrowserWindow` constructor alongside `resizable: false` — should be a small, low-risk change, but verify live (this session's whole lesson: don't trust an unverified "fix" for this window-sizing bug class again).
+
+Kevin asked to defer this to tomorrow. Do not lose this thread — pick up from here.
