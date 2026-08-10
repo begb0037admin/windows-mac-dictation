@@ -780,6 +780,39 @@ _MIN_VOCAB_OVERLAP = 0.35
 # ("call John" -> "Okay, I'll call John for you").
 _MAX_NOVEL_VOCAB_RATIO = 0.40
 
+# Neither vocabulary check above catches a fabrication that rephrases a
+# request/question into a first-person confirmation using mostly the raw
+# transcript's own words — e.g. "remind me to call sarah at five" ->
+# "I'll remind you to call Sarah at five." shares 6 of 7 raw words (passes
+# _MIN_VOCAB_OVERLAP) and adds only "I'll"/"you" (2 of 8 cleaned words,
+# passes _MAX_NOVEL_VOCAB_RATIO). No legitimate filler-stripping/grammar
+# edit ever introduces a conversational reply opener that wasn't already
+# there — cleanup edits the sentence that was spoken, it never switches
+# who's speaking. Catch this by structure instead of vocabulary: reject a
+# cleaned result that opens with one of these markers unless the raw
+# transcript already opened with it too (a person's own dictated speech
+# starting with "Yes,"/"Sorry,"/etc. is legitimate and must pass through
+# unchanged). Apostrophes are stripped before matching so contractions
+# match regardless of exactly how Whisper punctuated them.
+_ANSWER_OPENERS = (
+    "yes", "yeah", "yep", "no", "nope", "sure", "okay", "ok", "certainly",
+    "of course", "absolutely",
+    "ill", "i can", "i cant", "i cannot", "i dont", "i do not",
+    "im", "i am", "ive", "i have", "id", "i would",
+    "let me", "heres", "here is", "here are",
+    "sounds good", "got it", "no problem", "happy to", "sorry",
+)
+
+
+def _has_answer_opener(text: str) -> bool:
+    normalized = text.strip().lower().replace("'", "")
+    return any(
+        normalized == opener
+        or normalized.startswith(opener + " ")
+        or normalized.startswith(opener + ",")
+        for opener in _ANSWER_OPENERS
+    )
+
 
 def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
     raw_stripped = raw.strip()
@@ -834,6 +867,11 @@ def is_plausible_cleanup(raw: str, cleaned: str) -> bool:
         novel_ratio = len(cleaned_words - raw_words) / len(cleaned_words)
         if novel_ratio > _MAX_NOVEL_VOCAB_RATIO:
             return False
+
+    # Structural check, independent of both vocabulary ratios above — see
+    # _ANSWER_OPENERS' comment for the exact gap this closes.
+    if _has_answer_opener(cleaned_stripped) and not _has_answer_opener(raw_stripped):
+        return False
 
     return True
 

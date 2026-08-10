@@ -78,6 +78,41 @@ class PlausibleCleanupTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_request_rephrased_as_first_person_confirmation(self):
+        # Passes both vocabulary checks (6/7 raw words survive, only 2/8
+        # cleaned words are novel) but is a fabricated reply, not an edit —
+        # the 2026-08-10 incident class this guards against.
+        self.assertFalse(
+            main.is_plausible_cleanup(
+                "remind me to call sarah at five",
+                "I'll remind you to call Sarah at five.",
+            )
+        )
+
+    def test_rejects_question_rephrased_as_yes_confirmation(self):
+        self.assertFalse(
+            main.is_plausible_cleanup(
+                "will you send the report today",
+                "Yes, I will send the report today.",
+            )
+        )
+
+    def test_allows_legitimate_dictation_that_starts_with_an_opener_word(self):
+        # The user's own spoken sentence can legitimately start with "Yes"/
+        # "Sorry"/"I'll" etc. — only reject when that opener is new.
+        self.assertTrue(
+            main.is_plausible_cleanup(
+                "yes I will be there at five",
+                "Yes, I will be there at five.",
+            )
+        )
+        self.assertTrue(
+            main.is_plausible_cleanup(
+                "sorry ill be late",
+                "Sorry, I'll be late.",
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
