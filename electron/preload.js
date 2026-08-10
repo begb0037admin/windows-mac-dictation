@@ -2,20 +2,11 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// -webkit-app-region: drag blocks normal DOM mouse events entirely on the
-// region it's applied to, which is fine for pure dragging but means a
-// region can never also be a click target (e.g. "click the pill to
-// expand"). So drag regions are plain (non-app-region) elements instead,
-// and app.js drives movement itself via mousedown/mousemove, calling
-// moveWindowBy. sendCommand/onBackendEvent are the JSON-lines pipe to the
-// Python backend (see main.py's module docstring / electron/main.js).
+// The renderer uses Electron's native draggable regions for window movement;
+// only deliberate mode changes cross this bridge. sendCommand/onBackendEvent
+// are the JSON-lines pipe to the Python backend (see main.py's module
+// docstring / electron/main.js).
 contextBridge.exposeInMainWorld('electronAPI', {
-  moveWindowBy: (dx, dy) => ipcRenderer.send('move-window-by', dx, dy),
-  // dragStart/dragEnd bracket a drag gesture so main.js can accumulate the
-  // origin in its own process instead of re-reading window bounds on every
-  // tick - see the move-window-by handler in main.js for why that matters.
-  dragStart: () => ipcRenderer.send('drag-start'),
-  dragEnd: () => ipcRenderer.send('drag-end'),
   resizeWindow: (width, height) => ipcRenderer.send('resize-window', width, height),
   closeWindow: () => ipcRenderer.send('close-window'),
   openMacAccessibilitySettings: () => ipcRenderer.send('open-accessibility-settings'),

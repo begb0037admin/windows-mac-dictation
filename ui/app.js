@@ -45,8 +45,7 @@ function cacheDom() {
     viewSettings: document.getElementById('viewSettings'),
     btnSettings: document.getElementById('btnSettings'),
     btnBack: document.getElementById('btnBack'),
-    appHeader: document.getElementById('appHeader'),
-    pillBar: document.querySelector('.pill-bar'),
+    btnPillExpand: document.getElementById('btnPillExpand'),
     // Settings fields
     settingTheme: document.getElementById('settingTheme'),
     settingOpacity: document.getElementById('settingOpacity'),
@@ -425,74 +424,6 @@ async function disablePillMode() {
   }
 }
 
-// ── Window drag ──
-//
-// -webkit-app-region: drag regions never dispatch normal DOM mouse events
-// to JS at all (Chromium routes them straight to native window-move
-// handling) — fine for pure dragging, but it means a drag region can never
-// also be a click target. Since the pill has no expand button (only the
-// waveform is visible — a plain click on it expands back to Full mode),
-// .header/.pill-bar are plain elements instead, and movement is driven
-// here via mousedown/mousemove, through window.electronAPI.moveWindowBy()
-// (exposed by preload.js). Click-vs-drag is distinguished by total pointer
-// movement since mousedown: below CLICK_THRESHOLD_PX counts as a click.
-
-const CLICK_THRESHOLD_PX = 4;
-
-function initDrag() {
-  const targets = [dom.appHeader, dom.pillBar].filter(Boolean);
-  if (!targets.length) return;
-
-  let dragging = false;
-  let startEl = null;
-  let lastX = 0;
-  let lastY = 0;
-  let totalMove = 0;
-
-  function onMouseDown(e) {
-    if (e.button !== 0) return;
-    if (e.target.closest('button, input, select, [contenteditable="true"]')) return;
-    dragging = true;
-    startEl = e.currentTarget;
-    lastX = e.screenX;
-    lastY = e.screenY;
-    totalMove = 0;
-    if (window.electronAPI) {
-      window.electronAPI.dragStart();
-    }
-    e.preventDefault();
-  }
-
-  function onMouseMove(e) {
-    if (!dragging) return;
-    const dx = e.screenX - lastX;
-    const dy = e.screenY - lastY;
-    if (dx === 0 && dy === 0) return;
-    lastX = e.screenX;
-    lastY = e.screenY;
-    totalMove += Math.abs(dx) + Math.abs(dy);
-    if (window.electronAPI) {
-      window.electronAPI.moveWindowBy(dx, dy);
-    }
-  }
-
-  function onMouseUp() {
-    if (!dragging) return;
-    if (window.electronAPI) {
-      window.electronAPI.dragEnd();
-    }
-    if (startEl === dom.pillBar && totalMove < CLICK_THRESHOLD_PX && isPillMode) {
-      disablePillMode();
-    }
-    dragging = false;
-    startEl = null;
-  }
-
-  targets.forEach((el) => el.addEventListener('mousedown', onMouseDown));
-  document.addEventListener('mousemove', onMouseMove);
-  document.addEventListener('mouseup', onMouseUp);
-}
-
 // ── Flash notification ──
 
 function showFlash(message) {
@@ -675,7 +606,6 @@ function init() {
   cacheDom();
   initWaveform();
   startIdleShimmer();
-  initDrag();
 
   if (window.electronAPI && window.electronAPI.onBackendEvent) {
     window.electronAPI.onBackendEvent(handleBackendEvent);
@@ -722,6 +652,7 @@ function init() {
   }
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
+  if (dom.btnPillExpand) dom.btnPillExpand.addEventListener('click', disablePillMode);
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
     if (window.electronAPI) {
       window.electronAPI.closeWindow();

@@ -365,101 +365,12 @@ ipcMain.on('backend-command', (event, cmd) => {
   }
 });
 
-// Kevin (2026-08-10, second correction the same day - supersedes both
-// commit e320458 AND this session's own first attempt at replacing it).
-//
-// e320458 diagnosed the right symptom (dragging the pill/header on Windows
-// grew the window instead of just translating it) but its own mitigation
-// was the bug: it called win.getBounds() then win.setBounds({x, y, width,
-// height}) on EVERY mousemove tick, re-reading and writing back
-// width/height it had JUST read - which cements whatever drift already
-// happened rather than correcting it, and compounds across a drag with
-// dozens of ticks. Reproduced live: 170x56 pill grew to 204x92 over one
-// drag with that code installed.
-//
-// This session's first fix (setPosition(x, y) only, never touching
-// width/height at all, on the theory that setBounds's DIP<->physical-pixel
-// round-trip was the sole cause) was ALSO verified live to be insufficient
-// - and this matters, because it disproves that theory. With setPosition-
-// only code installed, live drags on this machine (real OS mouse input,
-// confirmed via debug logging of win.getBounds() read directly inside this
-// handler on every tick - not an external reader that could itself be
-// DPI-confused) still grew the window: e.g. one drag went 402x362 ->
-// 440x403, a second continued 440x403 -> 692x660, growing on almost every
-// single tick even though setPosition() was never given a width or height.
-// So the growth isn't caused by an API that writes size - it happens to
-// win.getBounds()'s own reported size as a side effect of ANY window-move
-// call, repeated at mousemove frequency, under this machine's DPI mismatch
-// (physical 3840x2160 vs logical ~2194x1234, ~175% scale reported
-// inconsistently between APIs - confirmed via WinForms Screen.Bounds vs
-// GetWindowRect at the same instant). Windows/Chromium is silently
-// re-deriving the window's physical size from a stored logical (DIP) size
-// using the DPI scale factor at the time of each move, and that derivation
-// rounds inconsistently call to call.
-//
-// The actual fix: never let a value that could already be drifted feed
-// back into the next call. Pin every drag's width/height to
-// `currentWindowSize` (below) - the last size WE explicitly asked for via
-// resize-window, never a fresh getBounds() read - because a getBounds()
-// read can itself already carry a tick's worth of DPI-rounding drift.
-// Verified live: pinning to a cached getBounds() snapshot taken fresh at
-// each drag-start (an earlier version of this fix, also tested live) held
-// steady *within* one drag but let a couple of pixels of drift creep in
-// *between* separate drags, because each new drag-start re-anchored to
-// whatever getBounds() reported right then. This window is
-// `resizable: false` (see createWindow() below) and only ever has exactly
-// two legitimate sizes - 400x360 full, 170x56 pill - both set explicitly
-// via the resize-window IPC below, so there is always an authoritative
-// value to pin to that never needs to come from a read.
-// There is only ever one BrowserWindow in this app (confirmed: the only
-// `new BrowserWindow(` call in this codebase is createWindow() below), so
-// a single module-level tracker is sufficient - no per-window map needed.
-let currentWindowSize = { width: 400, height: 360 }; // must match createWindow()'s initial width/height
-let activeDrag = null; // { win, x, y } while a drag is in progress, else null
-
-ipcMain.on('drag-start', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return;
-  const bounds = win.getBounds();
-  activeDrag = { win, x: bounds.x, y: bounds.y };
-});
-
-ipcMain.on('move-window-by', (event, dx, dy) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return;
-  if (!activeDrag || activeDrag.win !== win) {
-    // Safety fallback: move-window-by fired without a matching drag-start
-    // (e.g. the renderer missed sending it). Still pin to
-    // currentWindowSize, not a getBounds() read, for the same reason as
-    // the main path below.
-    const bounds = win.getBounds();
-    win.setBounds({
-      x: bounds.x + Math.round(dx),
-      y: bounds.y + Math.round(dy),
-      width: currentWindowSize.width,
-      height: currentWindowSize.height,
-    });
-    return;
-  }
-  activeDrag.x += Math.round(dx);
-  activeDrag.y += Math.round(dy);
-  activeDrag.win.setBounds({
-    x: activeDrag.x,
-    y: activeDrag.y,
-    width: currentWindowSize.width,
-    height: currentWindowSize.height,
-  });
-});
-
-ipcMain.on('drag-end', () => {
-  activeDrag = null;
-});
-
 ipcMain.on('resize-window', (event, width, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
-  currentWindowSize = { width: Math.round(width), height: Math.round(height) };
-  win.setBounds({ width: currentWindowSize.width, height: currentWindowSize.height });
+  // Mode switches are the only legitimate size changes. Dragging is
+  // Electron's native app-region operation and never reaches this handler.
+  win.setSize(Math.round(width), Math.round(height));
 });
 
 ipcMain.on('close-window', (event) => {
