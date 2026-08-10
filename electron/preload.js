@@ -11,6 +11,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Python backend (see main.py's module docstring / electron/main.js).
 contextBridge.exposeInMainWorld('electronAPI', {
   moveWindowBy: (dx, dy) => ipcRenderer.send('move-window-by', dx, dy),
+  // dragStart/dragEnd bracket a drag gesture so main.js can accumulate the
+  // origin in its own process instead of re-reading window bounds on every
+  // tick - see the move-window-by handler in main.js for why that matters.
+  dragStart: () => ipcRenderer.send('drag-start'),
+  dragEnd: () => ipcRenderer.send('drag-end'),
   resizeWindow: (width, height) => ipcRenderer.send('resize-window', width, height),
   closeWindow: () => ipcRenderer.send('close-window'),
   openMacAccessibilitySettings: () => ipcRenderer.send('open-accessibility-settings'),

@@ -457,6 +457,9 @@ function initDrag() {
     lastX = e.screenX;
     lastY = e.screenY;
     totalMove = 0;
+    if (window.electronAPI) {
+      window.electronAPI.dragStart();
+    }
     e.preventDefault();
   }
 
@@ -475,6 +478,9 @@ function initDrag() {
 
   function onMouseUp() {
     if (!dragging) return;
+    if (window.electronAPI) {
+      window.electronAPI.dragEnd();
+    }
     if (startEl === dom.pillBar && totalMove < CLICK_THRESHOLD_PX && isPillMode) {
       disablePillMode();
     }
