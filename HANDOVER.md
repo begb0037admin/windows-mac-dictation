@@ -889,3 +889,22 @@ Kevin reported "same problem again" with a screenshot showing the pill rendered 
 3. If confirmed, fix is likely just adding `maximizable: false` to the `BrowserWindow` constructor alongside `resizable: false` — should be a small, low-risk change, but verify live (this session's whole lesson: don't trust an unverified "fix" for this window-sizing bug class again).
 
 Kevin asked to defer this to tomorrow. Do not lose this thread — pick up from here.
+
+## FOLLOW-UP 2026-08-11 — Ballooning-pill hypothesis tested, NOT confirmed
+
+Continued from the entry above. Confirmed `.pill-bar`'s `border-radius: 999px` (ui/styles.css) as the mechanism that would render an oversized window as a circle — a large, roughly-square window with a 999px corner radius on all sides renders as a blob/circle, matching Kevin's screenshot exactly. This part of the mechanism is solid.
+
+**The `maximizable` hypothesis itself did not reproduce.** Tested live, on this machine, via 4 separate real OS-level input triggers against a running dev-mode instance (`electron .`, `resizable: false`, `maximizable` unset in `electron/main.js`'s `BrowserWindow` constructor — same as production):
+1. Real double-click (down-up-down-up, ~80-100ms gaps) on the header drag region (Full mode) — no size change.
+2. Real double-click on the pill drag region (Pill mode) — no size change.
+3. Windows native Snap-maximize shortcut (Win+Up) with the window focused — no size change.
+4. A real synthetic drag of the pill all the way to the screen's top edge (classic Aero-Snap-to-maximize trigger, and the most plausible match for what Kevin was actually doing when it happened) — no size change, and this one didn't even translate position, suggesting either the drag didn't register or Windows Snap assist is disabled/behaves differently in this environment.
+
+None of the four produced growth. `maximizable: false` therefore has NOT been confirmed as the fix, and was not applied — adding an unverified change here would repeat the exact mistake this whole bug already burned three attempts on (see the `e320458a`/`fb7fce2`/native-drag entries above: a plausible-sounding, plausible-mechanism fix that "should" work is not the same as a fix confirmed live).
+
+**Updated leading theory:** since the window was back to its correct size (700x630 physical, matching Full mode) within a minute or two of Kevin's report, and no sustained-maximize trigger reproduces it, this looks more likely to be a **transient rendering/compositor artifact** during a fast drag or a pill↔full mode-switch animation — a frame or two where the OS momentarily shows an interpolated/incorrect size mid-gesture, self-correcting once the gesture completes — rather than a persistent stuck state. This is a materially harder class of bug to pin down (a screenshot catches a instant, not a sustained reproducible state) and needs either (a) a real recording (screen capture) of the moment it happens next time, or (b) Kevin describing exactly what physical action preceded it (was he mid-drag? mid-mode-switch? did it self-correct or did he have to do something to fix it?).
+
+**Not yet done, worth trying next if it recurs:**
+- Ask Kevin to screen-record (or note the precise gesture) the next time this happens, rather than a single screenshot — a video would show whether it's transient (self-corrects) or persistent (stuck until some action).
+- Try reproducing during an actual pill→full or full→pill mode transition specifically (not just steady-state drag), since `resize-window`'s `setSize()` call happens instantaneously in Electron's main process but the renderer's CSS transition (`transition: box-shadow var(--transition)` etc. — check for any width/height transition too) could theoretically be mid-animation when a drag starts, an interaction this session didn't specifically test.
+- Check `ui/styles.css` for any CSS `transition` on `width`/`height`/`transform` that could cause a visually-oversized intermediate frame even when the underlying Electron window bounds never actually change.
