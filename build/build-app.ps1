@@ -63,6 +63,33 @@ function Assert-GeneratedPair {
     }
 }
 
+# Downloads the Microsoft VC++ Redistributable (x64) and verifies it is
+# Authenticode-signed by Microsoft before letting the build use it - not a
+# pinned hash, because aka.ms/vs/17/release/vc_redist.x64.exe is Microsoft's
+# own documented "always latest supported" redirect for exactly this kind of
+# bundling, and its content changes over time as Microsoft updates it; a
+# fixed hash would go stale and fail closed on a perfectly legitimate
+# update. Signature verification instead gives the same real supply-chain
+# guarantee (only Microsoft-signed binaries pass) without that staleness
+# problem. This exists because the frozen backend's CPU fallback path
+# (main.py's _resolve_whisper_device()) and onnxruntime both need
+# msvcp140_1.dll, which is missing on a stock/older-runtime Windows machine
+# and crashes the frozen exe outright rather than raising a catchable error
+# - confirmed live on a GPU-less machine (2026-08-24). See
+# build/nsis/vcredist-install.nsh for the installer-side half of this fix.
+function Get-VerifiedVcRedist {
+    param([string]$DestPath)
+    $Url = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+    Invoke-WebRequest -Uri $Url -OutFile $DestPath -UseBasicParsing
+    $Sig = Get-AuthenticodeSignature -FilePath $DestPath
+    if ($Sig.Status -ne 'Valid') {
+        Fail 20 "downloaded vc_redist.x64.exe has an invalid Authenticode signature: $($Sig.Status)"
+    }
+    if ($Sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        Fail 20 "downloaded vc_redist.x64.exe is not signed by Microsoft Corporation: $($Sig.SignerCertificate.Subject)"
+    }
+}
+
 # The checked-in hook is explicitly a pre-observation guess (SS16/SS18). It
 # must not be usable until a bootstrap installation has established the
 # exact Run-key registration and the hook has been rewritten and validated
@@ -209,6 +236,16 @@ foreach ($f in @('index.html', 'app.js', 'styles.css', 'logo.svg')) {
     if (-not (Test-Path (Join-Path $RepoRoot "ui\$f"))) { Fail 14 "required UI file missing: ui\$f" }
 }
 
+# Step 14.5: download and verify the VC++ Redistributable that
+# vcredist-install.nsh will bundle and silently install - required so the
+# same installer works on machines with no NVIDIA GPU (see
+# Get-VerifiedVcRedist above for why this is a signature check, not a
+# pinned hash).
+$RedistDir = Join-Path $RunRoot 'redist'
+New-Item -ItemType Directory -Force -Path $RedistDir | Out-Null
+$RedistExe = Join-Path $RedistDir 'vc_redist.x64.exe'
+Get-VerifiedVcRedist -DestPath $RedistExe
+
 # Step 15-16: generate and re-validate the builder config/metadata.
 $GeneratedConfig = Join-Path $RunRoot 'generated\electron-builder.json'
 & node (Join-Path $RepoRoot 'build\generate-builder-config.js') `
@@ -247,7 +284,7 @@ $AppExe = $AppCandidates[0]
 $UnpackedDir = $AppExe.Directory.FullName
 $ResourcesDir = Join-Path $UnpackedDir 'resources'
 $ExpectedUiFiles = @('app.js', 'index.html', 'logo.svg', 'styles.css')
-foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\ptt-backend.exe')) {
+foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\ptt-backend.exe', 'redist\vc_redist.x64.exe')) {
     if (-not (Test-Path (Join-Path $ResourcesDir $required))) {
         Fail 19 "packaged inventory missing: resources\$required"
     }

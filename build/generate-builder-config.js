@@ -89,12 +89,24 @@ function main() {
   const backendSource = path.join(runRootReal, 'backend', 'ptt-backend');
   const outputDir = path.join(runRootReal, 'electron');
   const uiSource = path.join(repoRoot, 'ui');
+  // Windows only: the Microsoft VC++ Redistributable, downloaded and
+  // Authenticode-verified by build-app.ps1 before this generator runs.
+  // Bundled + silently installed via build/nsis/vcredist-install.nsh
+  // because faster-whisper/ctranslate2's CPU codepath (main.py's
+  // _resolve_whisper_device() CUDA-fallback) and onnxruntime both need
+  // msvcp140_1.dll, which is absent on a stock/older-runtime Windows
+  // machine and crashes the frozen backend outright rather than raising a
+  // catchable error - confirmed live on a GPU-less machine (2026-08-24).
+  const redistSource = path.join(runRootReal, 'redist', 'vc_redist.x64.exe');
 
   // Step 2: reject any backend source or builder output path outside build/out/<run-id>/.
   for (const [label, p] of [['backend source', backendSource], ['builder output', outputDir]]) {
     if (p !== runRootReal && !p.startsWith(runRootReal + path.sep)) {
       fatal(2, `${label} must remain beneath ${runRootReal}, got ${p}`);
     }
+  }
+  if (args.platform === 'win' && !fs.existsSync(redistSource)) {
+    fatal(12, `missing required VC++ Redistributable: ${redistSource} (build-app.ps1 must download and verify it before calling this)`);
   }
 
   const includeHook = args['include-uninstall-hook'] === 'true';
@@ -171,6 +183,16 @@ function main() {
       // read its own version/commit/build-time via process.resourcesPath -
       // see electron/main.js's resolveBuildInfo().
       { from: buildInfoPath, to: 'build-info.json' },
+      // Windows only: the VC++ Redistributable, installed by
+      // vcredist-install.nsh's customInstall macro from
+      // $INSTDIR\resources\redist\ during setup - see redistSource above.
+      // `to` must be the exact destination file path, not just a directory
+      // name - extraResources copies a single-file `from` straight to `to`
+      // rather than into a directory named `to` (confirmed live: without
+      // the filename suffix here, vc_redist.x64.exe landed at
+      // resources\redist instead of resources\redist\vc_redist.x64.exe,
+      // which vcredist-install.nsh's ExecWait then couldn't find).
+      ...(args.platform === 'win' ? [{ from: redistSource, to: 'redist/vc_redist.x64.exe' }] : []),
     ],
     win: {
       target: args.platform === 'win' ? [{ target: 'nsis', arch: [args.arch] }] : undefined,
@@ -222,7 +244,16 @@ function main() {
     },
   };
   if (args.platform === 'win') delete config.mac; else delete config.win;
-  if (includeHook) {
+  // electron-builder only accepts a single nsis.include file. includeHook
+  // is unconditionally blocked above (uninstall-hook.nsh is unverified),
+  // so there's no live case today where both scripts are needed at once -
+  // fail loudly rather than silently dropping one if that ever changes.
+  if (args.platform === 'win' && includeHook) {
+    fatal(16, 'nsis.include cannot carry both uninstall-hook.nsh and vcredist-install.nsh - merge them into one script before enabling the uninstall hook');
+  }
+  if (args.platform === 'win') {
+    config.nsis.include = path.join(repoRoot, 'build', 'nsis', 'vcredist-install.nsh');
+  } else if (includeHook) {
     config.nsis.include = path.join(repoRoot, 'build', 'nsis', 'uninstall-hook.nsh');
   }
 

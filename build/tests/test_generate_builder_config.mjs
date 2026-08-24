@@ -34,10 +34,20 @@ function run(args) {
   return spawnSync('node', [GENERATOR, ...args], { encoding: 'utf8' });
 }
 
+// Windows builds require build-app.ps1 to have already downloaded and
+// Authenticode-verified the VC++ Redistributable into build/out/<runId>/redist/
+// before generate-builder-config.js runs - these fixtures stand in for that.
+function ensureRedistFixture(repoRoot, runId) {
+  const redistDir = path.join(repoRoot, 'build', 'out', runId, 'redist');
+  fs.mkdirSync(redistDir, { recursive: true });
+  fs.writeFileSync(path.join(redistDir, 'vc_redist.x64.exe'), 'fixture');
+}
+
 test('V1: generates a valid config+metadata pair for a real run directory', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-1';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
 
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
@@ -61,6 +71,7 @@ test('no temp file is left behind after a successful run (atomic rename)', () =>
   const runId = 'test-run-2';
   const runDir = path.join(repoRoot, 'build', 'out', runId);
   fs.mkdirSync(path.join(runDir, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const generatedDir = path.join(runDir, 'generated');
   const output = path.join(generatedDir, 'electron-builder.json');
 
@@ -76,6 +87,7 @@ test('unverified uninstall hook is mechanically blocked', () => {
   const repoRoot = freshRepo();
   const runId = 'test-run-3';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
 
   const blocked = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'true']);
@@ -85,7 +97,9 @@ test('unverified uninstall hook is mechanically blocked', () => {
   const allowed = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(allowed.status, 0, allowed.stderr);
   const withoutHook = JSON.parse(fs.readFileSync(output, 'utf8'));
-  assert.equal(withoutHook.nsis.include, undefined);
+  // The blocked uninstall hook must never be wired in - but Windows builds
+  // always carry the (separate, unblocked) VC++-redist install hook.
+  assert.match(withoutHook.nsis.include, /vcredist-install\.nsh$/);
 
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
@@ -131,6 +145,7 @@ test('generated Windows config fixes architecture, icons, and shortcuts', () => 
   const repoRoot = freshRepo();
   const runId = 'test-run-5';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -161,6 +176,7 @@ test('packaged app ships a build-info.json extraResource with version/commit/bui
   const repoRoot = freshRepo();
   const runId = 'test-run-8';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -190,6 +206,7 @@ test('packaged app ships the tray icon as a real extraResource (not extracted fr
   const repoRoot = freshRepo();
   const runId = 'test-run-7';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
   const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
   assert.equal(res.status, 0, res.stderr);
@@ -221,6 +238,7 @@ test('packaged app ships tray, permission-gate, recovery, and supervisor modules
   for (const platform of ['win', 'mac']) {
     const repoRoot = freshRepo();
     fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+    if (platform === 'win') ensureRedistFixture(repoRoot, runId);
     const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
     const arch = platform === 'win' ? 'x64' : 'arm64';
     const res = run(['--platform', platform, '--arch', arch, '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
@@ -255,6 +273,7 @@ test('interrupted-write simulation: a pre-existing corrupt output is fully repla
   const repoRoot = freshRepo();
   const runId = 'test-run-6';
   fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
   const generatedDir = path.join(repoRoot, 'build', 'out', runId, 'generated');
   fs.mkdirSync(generatedDir, { recursive: true });
   const output = path.join(generatedDir, 'electron-builder.json');
@@ -264,6 +283,52 @@ test('interrupted-write simulation: a pre-existing corrupt output is fully repla
   assert.equal(res.status, 0, res.stderr);
   const config = JSON.parse(fs.readFileSync(output, 'utf8'));
   assert.equal(config.appId, 'com.lelitte.ptt');
+
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('Windows build ships the VC++ Redistributable and wires its install hook', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-vcredist';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  ensureRedistFixture(repoRoot, runId);
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+
+  const redistResource = config.extraResources.find((r) => r.to === 'redist/vc_redist.x64.exe');
+  assert.ok(redistResource, 'must ship a redist/vc_redist.x64.exe extraResource so vcredist-install.nsh can install it from $INSTDIR\\resources\\redist');
+  assert.ok(fs.existsSync(redistResource.from), 'the referenced vc_redist.x64.exe must actually exist on disk');
+  assert.match(config.nsis.include, /vcredist-install\.nsh$/);
+
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('Windows build fails closed when the VC++ Redistributable is missing', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-no-redist';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  // Deliberately no ensureRedistFixture() call - simulates build-app.ps1
+  // failing to download/verify the redistributable before this generator runs.
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'win', '--arch', 'x64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 12);
+  assert.ok(!fs.existsSync(output), 'must not write a builder config that would ship without the redistributable');
+
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+test('Mac builds do not require or ship the Windows-only VC++ Redistributable', () => {
+  const repoRoot = freshRepo();
+  const runId = 'test-run-mac-no-redist';
+  fs.mkdirSync(path.join(repoRoot, 'build', 'out', runId, 'backend', 'ptt-backend'), { recursive: true });
+  const output = path.join(repoRoot, 'build', 'out', runId, 'generated', 'electron-builder.json');
+  const res = run(['--platform', 'mac', '--arch', 'arm64', '--run-id', runId, '--repo-root', repoRoot, '--output', output, '--include-uninstall-hook', 'false']);
+  assert.equal(res.status, 0, res.stderr);
+  const config = JSON.parse(fs.readFileSync(output, 'utf8'));
+  assert.equal(config.extraResources.find((r) => r.to === 'redist/vc_redist.x64.exe'), undefined);
+  assert.equal(config.nsis.include, undefined, 'vcredist-install.nsh is Windows-only');
 
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });

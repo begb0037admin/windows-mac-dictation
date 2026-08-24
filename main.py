@@ -75,7 +75,35 @@ for _stream in (sys.stdin, sys.stdout, sys.stderr):
 _event_stream = sys.stdout
 sys.stdout = sys.stderr
 
+def _resolve_whisper_device(whisper_cfg):
+    """Auto-downgrade a configured CUDA device to CPU when no NVIDIA GPU is
+    present, so the same Windows installer works on non-GPU machines instead
+    of ctranslate2 raising (or crashing outright) at model-load time. Only
+    touches faster-whisper's cuda default - never overrides an explicit
+    non-cuda choice, so a user who deliberately set "cpu" is unaffected.
+    float16 (the packaged default's compute_type) isn't a valid CPU compute
+    type for ctranslate2, so it's remapped to int8 alongside the fallback."""
+    if whisper_cfg.get("backend") != "faster-whisper" or whisper_cfg.get("device") != "cuda":
+        return whisper_cfg
+    try:
+        import ctranslate2
+
+        gpu_available = ctranslate2.get_cuda_device_count() > 0
+    except Exception as exc:
+        print(f"[main] CUDA availability check failed ({exc}); assuming no GPU")
+        gpu_available = False
+    if gpu_available:
+        return whisper_cfg
+    print("[main] no NVIDIA GPU detected - falling back to CPU transcription")
+    whisper_cfg = dict(whisper_cfg)
+    whisper_cfg["device"] = "cpu"
+    if whisper_cfg.get("compute_type") == "float16":
+        whisper_cfg["compute_type"] = "int8"
+    return whisper_cfg
+
+
 config = load_config()
+config["whisper"] = _resolve_whisper_device(config["whisper"])
 SAMPLE_RATE = config["sample_rate"]
 HOTKEY_NAME = config["hotkey"]
 
