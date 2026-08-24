@@ -72,7 +72,13 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['mlx_whisper', 'Quartz'],  # Mac-only, never needed on Windows
+    # tkinter is pulled in transitively (not imported by main.py or listed in
+    # requirements.txt) and is never used by this console-only backend.
+    # Excluded because PyInstaller 6.21.0's tkinter runtime hook cannot
+    # locate Python 3.14's zip-packaged Tcl/Tk 9.0 data directory
+    # ('//zipfs:/lib/tcl/tcl_library'), which crashes the frozen exe before
+    # it can start (FileNotFoundError in pyi_rth__tkinter).
+    excludes=['mlx_whisper', 'Quartz', 'tkinter', '_tkinter'],  # Mac-only / unused-GUI, never needed on Windows
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
