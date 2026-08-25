@@ -11,6 +11,7 @@
 - **Runs on:** Kevin's Windows 11 machine (RTX 3070, 8GB VRAM) AND a Mac (Apple Silicon, confirmed) — local-only, no cloud dependencies in MVP
 
 ## Bootstrap Order
+0. **Accountable lead: Markey** (`agent-commons/AGENT_DIRECTORY.md`). Any local session working in this repo should dispatch to Markey immediately rather than operating as a generic session — Markey reads its own `AGENT.md`, `MEMORY.md`, and this file before doing anything.
 1. This file (orientation)
 2. `AGENT_MODEL.md` and `CONSTITUTION.md` — governance and role model (cross-repo standard)
 3. `HANDOVER.md` — current state, what was just built, what's next
