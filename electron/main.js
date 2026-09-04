@@ -368,12 +368,35 @@ ipcMain.on('backend-command', (event, cmd) => {
 ipcMain.handle('resize-window', (event, width, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
+  const targetWidth = Math.round(width);
+  const targetHeight = Math.round(height);
   // Mode switches are the only legitimate size changes. Dragging is
   // Electron's native app-region operation and never reaches this handler.
   // handle (not on/send): the renderer awaits this before applying the
   // mode-pill/pill-mode CSS classes, which size .app off 100vh - see
   // ui/app.js's enablePillMode/disablePillMode for why the ordering matters.
-  win.setSize(Math.round(width), Math.round(height));
+  win.setSize(targetWidth, targetHeight);
+  // 2026-09-04: live-reproduced (main-process getBounds() timestamps,
+  // repeated real toggles) - setSize() silently no-ops on this frameless/
+  // transparent/alwaysOnTop/resizable:false window, reliably from the
+  // second Full<->Pill toggle onward in a session. This is the actual
+  // root cause of the oversized-circle report surviving the CSS-ordering
+  // fix above: the renderer awaited a "successful" IPC call that had not
+  // actually resized anything, then applied border-radius:999px to a
+  // still-full-size window. setBounds() with an explicit target rect has
+  // been live-verified to succeed every single time setSize() alone
+  // didn't (4 consecutive toggles, zero misses) - use it as a fallback
+  // whenever the resize didn't actually take effect.
+  const actual = win.getSize();
+  if (actual[0] !== targetWidth || actual[1] !== targetHeight) {
+    const { x, y } = win.getBounds();
+    win.setBounds({ x, y, width: targetWidth, height: targetHeight });
+    appendLog('main', sanitizeStderrLine(`P2T_DIAG ${JSON.stringify({
+      code: 'RESIZE_SETSIZE_NOOP',
+      wanted: [targetWidth, targetHeight],
+      got: actual,
+    })}`));
+  }
 });
 
 ipcMain.on('close-window', (event) => {
