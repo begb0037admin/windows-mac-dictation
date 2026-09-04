@@ -365,11 +365,14 @@ ipcMain.on('backend-command', (event, cmd) => {
   }
 });
 
-ipcMain.on('resize-window', (event, width, height) => {
+ipcMain.handle('resize-window', (event, width, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
   // Mode switches are the only legitimate size changes. Dragging is
   // Electron's native app-region operation and never reaches this handler.
+  // handle (not on/send): the renderer awaits this before applying the
+  // mode-pill/pill-mode CSS classes, which size .app off 100vh - see
+  // ui/app.js's enablePillMode/disablePillMode for why the ordering matters.
   win.setSize(Math.round(width), Math.round(height));
 });
 

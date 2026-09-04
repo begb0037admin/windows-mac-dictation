@@ -393,12 +393,17 @@ function dismissAppError() {
 
 // ── Pill / Mini Bar Mode ──
 
+// Resize the native window FIRST, await it, THEN flip the CSS classes.
+// .app's height/border-radius (styles.css: body.pill-mode .app) are
+// derived from 100vh - if the classes flip before the native window has
+// actually resized, .pill-bar's border-radius:999px gets applied to
+// whatever size the window still is (e.g. a full-size 400x360 frame),
+// rendering as an oversized dark circle for at least one frame. Root cause
+// of the 10-11 Aug / 4 Sep oversized-orb reports - see HANDOVER.md.
 async function enablePillMode() {
   isPillMode = true;
-  dom.app.classList.add('mode-pill');
-  document.body.classList.add('pill-mode');
   if (window.electronAPI) {
-    window.electronAPI.resizeWindow(170, 56);
+    await window.electronAPI.resizeWindow(170, 56);
   } else if (window.pywebview && window.pywebview.api) {
     try {
       await pywebview.api.set_window_size(170, 56, true);
@@ -406,15 +411,14 @@ async function enablePillMode() {
       console.error('Failed to resize window to pill mode:', e);
     }
   }
+  dom.app.classList.add('mode-pill');
+  document.body.classList.add('pill-mode');
 }
 
 async function disablePillMode() {
   isPillMode = false;
-  dom.app.classList.remove('mode-pill');
-  document.body.classList.remove('pill-mode');
-  showDictation();
   if (window.electronAPI) {
-    window.electronAPI.resizeWindow(400, 360);
+    await window.electronAPI.resizeWindow(400, 360);
   } else if (window.pywebview && window.pywebview.api) {
     try {
       await pywebview.api.set_window_size(400, 360, false);
@@ -422,6 +426,9 @@ async function disablePillMode() {
       console.error('Failed to resize window to full mode:', e);
     }
   }
+  dom.app.classList.remove('mode-pill');
+  document.body.classList.remove('pill-mode');
+  showDictation();
 }
 
 // ── Flash notification ──
