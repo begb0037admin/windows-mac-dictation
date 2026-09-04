@@ -492,6 +492,14 @@ function createWindow() {
     // rounded shape) supplies the drop shadow instead.
     hasShadow: false,
     resizable: false,
+    // 2026-08-11 (HANDOVER.md, flagged not confirmed): a native drag-region
+    // title bar (-webkit-app-region: drag) still permits double-click/Snap
+    // maximize on Windows independent of resizable:false. Explicitly
+    // disabling maximize closes that path regardless of exact trigger —
+    // defensive fix for the ballooning-pill-into-a-circle report (matches
+    // .pill-bar's border-radius:999px rendering an oversized square window
+    // as a blob/circle).
+    maximizable: false,
     show: false,
     // Kevin: clicking any other window sent this one to the background,
     // which defeats the point of a push-to-talk overlay you glance at
