@@ -73,6 +73,28 @@ class TranscribeOptionsTests(unittest.TestCase):
         )
 
 
+class ModelReadyAccessorTests(unittest.TestCase):
+    def setUp(self):
+        transcribe_module._model = None
+        transcribe_module._backend = None
+
+    def tearDown(self):
+        transcribe_module._model = None
+        transcribe_module._backend = None
+
+    def test_is_model_ready_reflects_model_resolution(self):
+        self.assertFalse(transcribe_module.is_model_ready())
+        transcribe_module._model = "mlx-community/whisper-large-v3-turbo"
+        self.assertTrue(transcribe_module.is_model_ready())
+
+    def test_is_model_ready_is_read_only(self):
+        # Calling the accessor must not resolve or load anything.
+        with mock.patch.object(transcribe_module, "_get_model") as get_model:
+            transcribe_module.is_model_ready()
+        get_model.assert_not_called()
+        self.assertIsNone(transcribe_module._model)
+
+
 class TranscriptionSafetyTests(unittest.TestCase):
     def test_detects_an_obvious_phrase_loop(self):
         phrase = "why is it coming back"

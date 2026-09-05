@@ -399,6 +399,7 @@ body.pill-mode .app {
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
 
+.app.state-preparing-model .status-light,
 .app.state-transcribing .status-light,
 .app.state-cleanup .status-light {
   background: var(--accent-cyan);
