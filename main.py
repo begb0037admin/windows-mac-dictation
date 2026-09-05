@@ -50,6 +50,7 @@ from inject import inject
 from transcribe import (
     UnreliableTranscriptionError,
     has_repetition_loop,
+    is_model_ready,
     transcribe,
 )
 
@@ -210,6 +211,11 @@ focus_target = None
 STREAM_TEARDOWN_TIMEOUT_S = 3.0
 STOPPING_STATUS = "Stopping..."
 RECOVERING_STATUS = "Recovering from an audio problem…"
+# Shown in place of "Transcribing..." for the very first transcription after
+# a fresh install / cleared model cache, when the weights (up to ~1.5GB on
+# Mac's large-v3-turbo) download inside the transcribe() call and it would
+# otherwise look like a silent multi-minute hang.
+MODEL_PREP_STATUS = "Preparing speech model (one-time, first run)…"
 
 
 # ── Focus tracking ──
@@ -995,7 +1001,13 @@ def stop_recording():
             wf.writeframes(pcm16.tobytes())
         print(f"[debug] saved captured audio to {save_path}")
 
-    push_status("transcribing", "Transcribing...")
+    # Same transcribe() call as always — only the status label differs on the
+    # first, uncached run, where the weight download happens inside it. Warm
+    # runs (is_model_ready() true) are byte-for-byte unchanged.
+    if is_model_ready():
+        push_status("transcribing", "Transcribing...")
+    else:
+        push_status("preparing-model", MODEL_PREP_STATUS)
     transcription_started_at = time.perf_counter()
     try:
         with transcribe_lock:

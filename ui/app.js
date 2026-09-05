@@ -8,7 +8,7 @@
 
 // ── State ──
 
-const STATES = ['idle', 'recording', 'transcribing', 'cleanup', 'pasting', 'error', 'stopping', 'recovering'];
+const STATES = ['idle', 'recording', 'preparing-model', 'transcribing', 'cleanup', 'pasting', 'error', 'stopping', 'recovering'];
 // audioLevels must be at least as long as the larger of the two bar counts
 // below (the pill reads it at index i*2, so it needs at least
 // PILL_BAR_COUNT*2 slots too) -- a mismatch here previously left the
@@ -276,6 +276,7 @@ function stopIdleShimmer() {
 // too long for a 170px-wide pill, so this is a separate, deliberately
 // terse mapping.
 const PILL_STATUS_TEXT = {
+  'preparing-model': 'Preparing…',
   transcribing: 'Transcribing…',
   cleanup: 'Cleaning up…',
   pasting: 'Pasting…',
@@ -284,9 +285,65 @@ const PILL_STATUS_TEXT = {
   recovering: 'Recovering…',
 };
 
+// ── First-run model-preparation hint (additive, informational only) ──
+//
+// On the first transcription after a fresh install / cleared cache, the
+// speech-model weights (~1.5 GB on Mac) download inside the transcribe()
+// call. The backend now flags that with a distinct 'preparing-model'
+// status. This is a belt-and-braces caption: if we sit in that state (or an
+// unusually long 'transcribing') past a threshold, explain the one-time
+// wait. It never blocks or delays anything — it only rewrites the caption
+// placeholder text, and any real transcript immediately overwrites it.
+const MODEL_PREP_HINT_AFTER_MS = 12000;
+const WAITING_PLACEHOLDER_HTML = '<span class="caption-placeholder">Waiting for speech...</span>';
+let modelPrepHintTimer = null;
+let modelPrepHintShown = false;
+
+function clearModelPrepHint() {
+  if (modelPrepHintTimer !== null) {
+    clearTimeout(modelPrepHintTimer);
+    modelPrepHintTimer = null;
+  }
+}
+
+// Restore the normal placeholder if (and only if) our hint is the thing
+// currently on screen — never stomp a real or partial transcript.
+function retractModelPrepHint() {
+  if (!modelPrepHintShown) return;
+  modelPrepHintShown = false;
+  if (dom.captionText && dom.captionText.querySelector('.caption-placeholder')) {
+    dom.captionText.innerHTML = WAITING_PLACEHOLDER_HTML;
+  }
+}
+
+function armModelPrepHint() {
+  clearModelPrepHint();
+  modelPrepHintTimer = setTimeout(() => {
+    modelPrepHintTimer = null;
+    // Re-checked here (not just when armed): by the time this fires,
+    // updateStatus() has run to completion for whatever state we're now in.
+    // Only ever replace the standard placeholder — if a real or partial
+    // transcript is already showing (no .caption-placeholder node), leave it.
+    if (
+      (currentState === 'preparing-model' || currentState === 'transcribing')
+      && dom.captionText
+      && dom.captionText.querySelector('.caption-placeholder')
+    ) {
+      dom.captionText.textContent = '';
+      const span = document.createElement('span');
+      span.className = 'caption-placeholder';
+      span.textContent = currentState === 'preparing-model'
+        ? 'Setting up the speech model for the first time — this downloads about 1.5 GB, so it can take a few minutes. It only happens once.'
+        : 'Still working — the first transcription after launch takes longer while the speech model loads.';
+      dom.captionText.appendChild(span);
+      modelPrepHintShown = true;
+    }
+  }, MODEL_PREP_HINT_AFTER_MS);
+}
+
 /**
  * Called from Python/Electron to update the app state.
- * @param {string} state - One of: idle, recording, transcribing, cleanup, pasting, error, stopping, recovering
+ * @param {string} state - One of: idle, recording, preparing-model, transcribing, cleanup, pasting, error, stopping, recovering
  * @param {string} text - Status text, shown as the status light's hover tooltip, the full-view status text, and (via PILL_STATUS_TEXT) the pill label
  */
 function updateStatus(state, text) {
@@ -328,19 +385,35 @@ function updateStatus(state, text) {
       }
     }, 4000);
   }
+
+  // Arm the informational first-run hint while we could legitimately be
+  // waiting on the one-time model download/load; cancel it (and retract any
+  // hint already shown) otherwise.
+  if (state === 'preparing-model' || state === 'transcribing') {
+    armModelPrepHint();
+  } else {
+    clearModelPrepHint();
+    retractModelPrepHint();
+  }
 }
 
 function updateTranscript(text) {
   if (!text || text.trim() === '') {
-    dom.captionText.innerHTML = '<span class="caption-placeholder">Waiting for speech...</span>';
+    clearModelPrepHint();
+    dom.captionText.innerHTML = WAITING_PLACEHOLDER_HTML;
+    modelPrepHintShown = false;
     return;
   }
+  clearModelPrepHint();
+  modelPrepHintShown = false;
   dom.captionText.textContent = text;
   dom.captionText.scrollTop = dom.captionText.scrollHeight;
 }
 
 function updateFinalText(text) {
   if (text && text.trim() !== '') {
+    clearModelPrepHint();
+    modelPrepHintShown = false;
     dom.captionText.textContent = text;
     dom.captionText.scrollTop = dom.captionText.scrollHeight;
   }

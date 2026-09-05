@@ -131,6 +131,17 @@ def _get_model(whisper_config):
     return _model
 
 
+def is_model_ready() -> bool:
+    """True once the speech model has been resolved/loaded in this process,
+    i.e. the one-time first-run weight download has already happened.
+
+    Purely a read-only accessor for callers that want to show a distinct
+    "first run" status — it does not change anything about how transcribe()
+    or _get_model() load or download the model.
+    """
+    return _model is not None
+
+
 def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
     """Transcribe a mono float32 numpy array to text."""
     model = _get_model(whisper_config)
