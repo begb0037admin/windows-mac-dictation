@@ -18,6 +18,16 @@
   --accent-green: #6ce2b6;
   --accent-blue: #2f63d8;
   --accent-red: #f87171;
+  /* Mini-pill state fills (Kevin 2026-09-09): one fixed capsule that just
+     changes colour per state - idle black, purple while preparing/
+     transcribing/cleaning, green on paste. Flat colours so the change
+     eases via a background-color transition. */
+  --pill-idle: #171b24;
+  --pill-idle-ink: #b8c4d6;
+  --pill-purple: #8b7cf6;
+  --pill-purple-ink: #0e0a24;
+  --pill-green: #6ce2b6;
+  --pill-green-ink: #08241b;
   --gradient-wave: linear-gradient(180deg, #5eead4, #a78bfa, #f472b6);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.24), transparent 19rem);
   --shadow-brand: 0 8px 20px rgba(17, 24, 39, 0.3);
@@ -42,6 +52,12 @@
   --accent-green: #0d9668;
   --accent-blue: #2f63d8;
   --accent-red: #dc2626;
+  --pill-idle: #ffffff;
+  --pill-idle-ink: #4a5568;
+  --pill-purple: #7c3aed;
+  --pill-purple-ink: #f3efff;
+  --pill-green: #0d9668;
+  --pill-green-ink: #eafff6;
   --gradient-wave: linear-gradient(180deg, #0e7490, #0d9668);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.08), transparent 19rem);
   --shadow-brand: 0 8px 20px rgba(0, 0, 0, 0.1);
@@ -283,22 +299,36 @@ body.pill-mode .app {
   align-items: center;
   justify-content: center;
   position: relative;
-  width: fit-content;
-  max-width: 100%;
+  /* Kevin (2026-09-09): the capsule is now one fixed size - it fills the
+     whole pill window - for every state (idle waveform, purple
+     processing, green paste). Only the fill colour changes, and it eases
+     rather than snaps. No fit-content, no hover-grow: nothing shifts the
+     capsule's size or shape between notifications. */
+  width: 100%;
   height: 100%;
   padding: 0 18px;
   gap: 14px;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(32, 36, 48, 0.98), rgba(15, 18, 26, 0.98));
-  /* Kevin (2026-09-09): drop the drop-shadow/inset-highlight look entirely. */
+  background-color: var(--pill-idle);
+  color: var(--pill-idle-ink);
   box-shadow: none;
   cursor: move;
-  transition: box-shadow var(--transition), padding-right var(--transition), width var(--transition);
+  transition: background-color 0.28s ease, color 0.28s ease;
   -webkit-app-region: drag;
 }
 
-.pill-bar:hover {
-  padding-right: 40px;
+/* Pill state fills. idle + recording keep the neutral capsule (with the
+   live waveform); the processing states go purple; paste goes green -
+   all in the same fixed-size capsule. */
+.app.state-preparing-model .pill-bar,
+.app.state-transcribing .pill-bar,
+.app.state-cleanup .pill-bar {
+  background-color: var(--pill-purple);
+  color: var(--pill-purple-ink);
+}
+.app.state-pasting .pill-bar {
+  background-color: var(--pill-green);
+  color: var(--pill-green-ink);
 }
 
 /* A native drag region deliberately does not dispatch DOM clicks. Keep one
@@ -338,10 +368,6 @@ body.pill-mode .app {
 
 .theme-light .pill-expand:hover {
   background: rgba(0, 0, 0, 0.08);
-}
-
-.theme-light .pill-bar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(240, 244, 248, 0.98));
 }
 
 .app.state-recording .pill-bar {
@@ -397,8 +423,11 @@ body.pill-mode .app {
      can't force the pill wider than max-width allows. */
   min-width: 0;
   font-size: 11px;
-  font-weight: 700;
-  color: var(--ink-dim);
+  font-weight: 800;
+  /* Follows .pill-bar's own colour, which changes with state (neutral /
+     purple / green) - Kevin 2026-09-09. */
+  color: inherit;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -863,29 +892,12 @@ select.field optgroup {
   transform: translateX(-50%) translateY(0);
 }
 
-/* The 50px top offset above is sized for the 360px-tall Full view and
-   clips against the window's own physical edge in the 56px-tall Mini
-   Pill -- paste can now fire while sitting in Pill mode (full
-   auto-send doesn't require Full view to be open), so this is reachable
-   in normal use, not just an edge case. Pill mode centers the flash
-   vertically instead, which fits regardless of the pill's exact height. */
+/* Kevin (2026-09-09): in Pill mode the paste confirmation is the capsule
+   itself turning green (see .app.state-pasting .pill-bar) with a "✓ Pasted"
+   label - one fixed-size shape, no separate overlay pill of a different
+   size floating on top. The .flash overlay stays for Full view only. */
 body.pill-mode .flash {
-  top: 50%;
-  transform: translate(-50%, calc(-50% - 6px));
-}
-
-body.pill-mode .flash.show {
-  transform: translate(-50%, -50%);
-}
-
-/* Kevin (2026-09-09): the flash pill is smaller than .pill-bar's own white
-   capsule behind it, so the white showed as an outer ring/border around
-   the green "Pasted" confirmation. Hiding .pill-bar's background while
-   flash-active (see showFlash() in app.js) makes the confirmation read as
-   just the green pill on its own. */
-body.pill-mode.flash-active .pill-bar {
-  background: transparent;
-  box-shadow: none;
+  display: none;
 }
 
 /* ── Spinner ── */

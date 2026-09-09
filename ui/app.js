@@ -326,7 +326,7 @@ const PILL_STATUS_TEXT = {
   'preparing-model': 'Preparing…',
   transcribing: 'Transcribing…',
   cleanup: 'Cleaning up…',
-  pasting: 'Pasting…',
+  pasting: '✓ Pasted',
   error: 'Error',
   stopping: 'Stopping…',
   recovering: 'Recovering…',
