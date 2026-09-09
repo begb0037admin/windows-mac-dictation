@@ -155,9 +155,8 @@ function paintBar(bar, level, maxHeight, minHeight, index, count, mono) {
   const frac = index / count;
   const color = mono ? chromeColor(frac, level) : auroraColor(index, count, level);
   bar.style.background = color;
-  bar.style.boxShadow = mono
-    ? `0 0 ${3 + level * 6}px rgba(255, 255, 255, 0.3)`
-    : `0 0 ${5 + level * 12}px ${color.replace('hsl', 'hsla').replace(')', ',0.55)')}`;
+  // Kevin (2026-09-09): drop the per-bar glow shadow entirely.
+  bar.style.boxShadow = 'none';
 }
 
 // See the "almost straight, not enough curves" comment in updateAudioLevel
@@ -524,8 +523,13 @@ async function disablePillMode() {
 function showFlash(message) {
   dom.flash.textContent = message;
   dom.flash.classList.add('show');
+  // Kevin (2026-09-09): in Pill mode, hide the white pill-bar behind the
+  // green flash so the confirmation reads as just the green pill, not a
+  // green badge sitting inside a bigger white one.
+  document.body.classList.add('flash-active');
   setTimeout(() => {
     dom.flash.classList.remove('show');
+    document.body.classList.remove('flash-active');
   }, 1500);
 }
 

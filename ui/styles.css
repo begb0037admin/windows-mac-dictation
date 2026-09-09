@@ -290,9 +290,8 @@ body.pill-mode .app {
   gap: 14px;
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(32, 36, 48, 0.98), rgba(15, 18, 26, 0.98));
-  box-shadow:
-    0 3px 10px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* Kevin (2026-09-09): drop the drop-shadow/inset-highlight look entirely. */
+  box-shadow: none;
   cursor: move;
   transition: box-shadow var(--transition), padding-right var(--transition), width var(--transition);
   -webkit-app-region: drag;
@@ -346,10 +345,8 @@ body.pill-mode .app {
 }
 
 .app.state-recording .pill-bar {
-  box-shadow:
-    0 3px 10px rgba(0, 0, 0, 0.18),
-    0 0 0 1px rgba(108, 226, 182, 0.35),
-    0 0 20px rgba(108, 226, 182, 0.15);
+  /* Kevin (2026-09-09): drop the drop-shadow/glow ring look entirely. */
+  box-shadow: none;
 }
 
 /* Kevin (2026-09-08) / Codex review: this used to be `flex: 1` inside a
@@ -879,6 +876,16 @@ body.pill-mode .flash {
 
 body.pill-mode .flash.show {
   transform: translate(-50%, -50%);
+}
+
+/* Kevin (2026-09-09): the flash pill is smaller than .pill-bar's own white
+   capsule behind it, so the white showed as an outer ring/border around
+   the green "Pasted" confirmation. Hiding .pill-bar's background while
+   flash-active (see showFlash() in app.js) makes the confirmation read as
+   just the green pill on its own. */
+body.pill-mode.flash-active .pill-bar {
+  background: transparent;
+  box-shadow: none;
 }
 
 /* ── Spinner ── */
