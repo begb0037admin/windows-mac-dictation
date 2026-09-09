@@ -218,11 +218,13 @@ function updateAudioLevel(rms) {
 
 function resetWaveform() {
   audioLevels.fill(0);
-  // Bar styling itself is no longer cleared here - the idle shimmer loop
-  // (started by updateStatus whenever state becomes 'idle') immediately
-  // repaints every bar via the same paintBar() used while recording, so
-  // idle and active are the same-sized, same-coloured component instead of
-  // two different-looking ones.
+  // Bar styling itself is no longer cleared here - startIdleShimmer()
+  // (called by updateStatus whenever state becomes 'idle') immediately
+  // repaints every bar once via the same paintBar() used while recording,
+  // so idle and active are the same-sized, same-coloured component instead
+  // of two different-looking ones. (2026-09-08: idle is now a single
+  // static paint, not a running loop - see idleShimmerTick()'s own
+  // comment below for why.)
 }
 
 // Kevin (2026-07-30): "use the active as the default in terms of size and
@@ -233,8 +235,24 @@ function resetWaveform() {
 // exact same paintBar() rendering as updateAudioLevel() above, just fed a
 // gentle synthetic level instead of real mic RMS, so idle is literally a
 // calmer instance of the same bars, not a lookalike.
-let idleAnimFrame = null;
-
+//
+// Kevin (2026-09-08): the above used to be a live requestAnimationFrame
+// loop (idleShimmerTick rescheduling itself every frame at up to 60fps),
+// continuously repainting height/opacity/background/box-shadow on all 78
+// bars (54 full + 24 pill) the entire time the app sat open and idle.
+// Live-measured via `top -l N -s 1` (instantaneous, not ps's lifetime
+// average): ~55-70% combined CPU across the Electron GPU + renderer
+// processes while idle-and-visible, dropping to a verified 0.0% only once
+// the window was hidden to tray - see
+// markey/memory/windows-mac-dictation-ptt-resource-usage-investigation-2026-09-08.md.
+// Kevin's explicit call after seeing those numbers: freeze idle completely
+// - no animation at all, not just a lower frame rate - and leave the
+// active-state animation (driven by updateAudioLevel() during actual
+// recording/transcribing/cleanup, untouched by any of this) exactly as it
+// was. idleShimmerTick() now paints a single static frame and does not
+// reschedule itself; startIdleShimmer()/stopIdleShimmer() keep their
+// existing names and call sites so the state-machine wiring in
+// updateStatus() (and init()) didn't need to change.
 function idleShimmerTick() {
   const now = Date.now();
   // Kevin (2026-07-30): "add more solid bars together" - the previous
@@ -255,19 +273,23 @@ function idleShimmerTick() {
     const synthetic = 0.2 + 0.14 * Math.sin(now / 620 + frac * 0.15);
     paintBar(pillBars[i], shapeLevel(synthetic, i, pillBars.length, now, PILL_ANIMATION_BOOST), 20, 3, i, pillBars.length, true);
   }
-  idleAnimFrame = requestAnimationFrame(idleShimmerTick);
+  // No requestAnimationFrame reschedule - idle is a fixed, single frame.
 }
 
 function startIdleShimmer() {
-  if (idleAnimFrame !== null) return;
+  // Always (re)paint the single static idle frame - e.g. after recording
+  // stops, so the last active waveform doesn't stay visible frozen on
+  // screen (resetWaveform() only clears the audioLevels buffer, not the
+  // bars' existing inline styles - idleShimmerTick() is what overwrites
+  // them). Cheap (one-off, not scheduled), safe to call every time.
   idleShimmerTick();
 }
 
 function stopIdleShimmer() {
-  if (idleAnimFrame !== null) {
-    cancelAnimationFrame(idleAnimFrame);
-    idleAnimFrame = null;
-  }
+  // No-op: idle no longer runs a loop, so there is nothing to cancel.
+  // Kept as a stable, named call site so updateStatus()'s existing
+  // state-machine wiring (idle -> startIdleShimmer(), everything else ->
+  // stopIdleShimmer()) didn't need to change.
 }
 
 // ── State management ──
