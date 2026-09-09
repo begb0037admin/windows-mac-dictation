@@ -119,11 +119,10 @@ function auroraColor(index, count, level) {
 // index - see shapeLevel()'s matching comment for why.
 function chromeColor(frac, level) {
   const isLight = document.body.classList.contains('theme-light');
-  // Kevin (2026-09-09): idle is a static single frame now, so the old
-  // Date.now() shimmer term just froze at a random per-bar brightness and
-  // read as a mottled light/dark bar row. Flat charcoal, only a slight
-  // lift with bar height.
-  const light = isLight ? 34 + level * 14 : 66 + level * 14;
+  const shimmer = 0.5 + 0.5 * Math.sin(Date.now() / 500 + frac * WAVE_PHASE_SCALE * 0.4);
+  const light = isLight
+    ? 30 + level * 15 + shimmer * 10
+    : 62 + level * 15 + shimmer * 14;
   return `hsl(220, 6%, ${Math.max(15, Math.min(92, light))}%)`;
 }
 
@@ -254,34 +253,51 @@ function resetWaveform() {
 // existing names and call sites so the state-machine wiring in
 // updateStatus() (and init()) didn't need to change.
 function idleShimmerTick() {
-  // Kevin (2026-09-09): idle is a single fixed frame, so feeding a slow
-  // synthetic sine through shapeLevel()'s two-term wobble just froze a
-  // random jagged phase - scattered tall spikes, lopsided, sitting in a
-  // sea of dashes rather than a clean shape. Idle now paints a
-  // deterministic, left/right-symmetric centre-weighted envelope: an even
-  // dot row across both outer thirds rising smoothly to a short tall
-  // cluster in the middle, with a gentle fixed ripple so the peak reads as
-  // a little waveform burst rather than one bald arc. Same shape every
-  // time - no `now`, no randomness. Active recording (updateAudioLevel) is
-  // untouched.
-  paintIdleEnvelope(waveformBars, 60, 4);
-  paintIdleEnvelope(pillBars, 20, 3);
+  const now = Date.now();
+  // Kevin (2026-07-30): "add more solid bars together" - the previous
+  // frac*0.5 spatial frequency made each "high" part of the cycle only
+  // span a couple of bars, reading as isolated peaks in a sea of thin
+  // dashes. A much slower spatial frequency (frac*0.15) spreads each
+  // high/low swing across many more consecutive bars, so a wider clump
+  // reads as solid together, travelling as one group rather than as
+  // scattered individual peaks. Raised the baseline too, so more of the
+  // cycle sits in "clearly solid" territory rather than "thin dash."
+  //
+  // Kevin (2026-09-09): the FULL view keeps exactly this look. Only the
+  // mini pill changes - see paintIdlePillEnvelope() below.
+  for (let i = 0; i < waveformBars.length; i++) {
+    const frac = (i / waveformBars.length) * WAVE_PHASE_SCALE;
+    const synthetic = 0.2 + 0.14 * Math.sin(now / 900 + frac * 0.15);
+    paintBar(waveformBars[i], shapeLevel(synthetic, i, waveformBars.length, now), 60, 4, i, waveformBars.length, true);
+  }
+  paintIdlePillEnvelope();
+  // No requestAnimationFrame reschedule - idle is a fixed, single frame.
 }
 
-// Symmetric bell envelope shared by both idle views. Gaussian falloff from
-// the centre bar (identical mirrored left/right) times a small
-// deterministic per-bar ripple for a touch of waveform-like unevenness in
-// the tall middle. Bars past roughly 45% out from centre fall below
-// paintBar()'s min height and render as the flat dot row on each side.
-function paintIdleEnvelope(bars, maxHeight, minHeight) {
-  const count = bars.length;
+// Kevin (2026-09-09): mini pill idle only. The old shared path froze
+// shapeLevel()'s animated two-term wobble at a random phase every time
+// idle appeared - scattered, lopsided spikes. The pill now paints a
+// deterministic, left/right-symmetric centre-weighted envelope: an even
+// dot row across both outer thirds rising to a short tall cluster in the
+// middle, with a gentle fixed per-bar ripple so the peak reads as a little
+// waveform burst rather than one bald arc. Same shape every time - no
+// `now`, no randomness. Full view and active recording are untouched.
+function paintIdlePillEnvelope() {
+  const count = pillBars.length;
   const center = (count - 1) / 2;
   const SIGMA = 0.20; // fraction of half-width; smaller = tighter centre cluster
   for (let i = 0; i < count; i++) {
     const d = (i - center) / (count / 2); // -1 .. 1 across the view
     const bell = Math.exp(-(d * d) / (2 * SIGMA * SIGMA));
     const ripple = 0.68 + 0.32 * Math.abs(Math.sin(i * 1.1));
-    paintBar(bars[i], bell * ripple * 0.95, maxHeight, minHeight, i, count, true);
+    const level = bell * ripple * 0.95;
+    paintBar(pillBars[i], level, 20, 3, i, count, true);
+    // Flat charcoal, not chromeColor()'s frozen Date.now() shimmer (which
+    // read as a mottled light/dark bar row on a static frame). Only a
+    // slight lift with bar height.
+    const isLight = document.body.classList.contains('theme-light');
+    const l = isLight ? 34 + level * 14 : 66 + level * 14;
+    pillBars[i].style.background = `hsl(220, 6%, ${Math.max(15, Math.min(92, l))}%)`;
   }
 }
 
