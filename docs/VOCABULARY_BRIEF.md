@@ -1,8 +1,8 @@
 # Personal Vocabulary — feature brief
 
-> Status: **SPEC — approved shape, not yet built.** Kevin asked for this
-> 2026-09-10 after "Codex" kept transcribing as "codec". To be built
-> **after** the Windows pill rebuild.
+> Status: **SPEC — approved, not yet built.** Kevin asked for this
+> 2026-09-10 after "Codex" kept transcribing as "codec". Two-file design
+> ("both") approved 2026-09-10. Windows pill rebuild is done; this is next.
 
 ## Goal
 
@@ -15,7 +15,9 @@ speech would need hours of labelled audio, a training pipeline, GPU time
 and re-quantising for mlx/ct2, to solve what a word-replacement list solves
 in one line.
 
-## The list — `vocabulary.json`, committed to the repo
+## The list — two files, merged at load (Kevin approved "both", 2026-09-10)
+
+Entry shape (both files):
 
 ```json
 [
@@ -25,15 +27,28 @@ in one line.
 ]
 ```
 
-- Lives at repo root, bundled into the app at build time (like `config.py`
-  / `transcribe.py`), so it is **identical on every machine built from
-  `main`** — that is the cross-machine guarantee.
 - `heard` matches whole words or whole multi-word phrases, case-insensitive.
 - `write` is inserted exactly as written.
-- Adding a term = edit this file + commit; it reaches all machines at the
-  next build. No per-machine config, no Settings step.
 - Trade-off Kevin accepted: `codec` is a real word — opting it in means
   "I always mean Codex."
+
+**1. `vocabulary.json` at repo root — the shared baseline.**
+Bundled into the app at build time (like `config.py` / `transcribe.py`), so
+it is identical on every machine built from `main`. Changing it = edit +
+commit + rebuild both machines. For terms that should always be everywhere.
+
+**2. `<P2T_CONFIG_DIR>/vocabulary.json` — per-machine, instant, no rebuild.**
+Lives in the same writable config dir as the per-machine `config.json`
+(`~/Library/Application Support/ptt/` on Mac, `%LOCALAPPDATA%\...\ptt\` on
+Windows). Optional — absent by default. Edit it and restart PTT; no build.
+An agent writes it on both machines over SSH in one step, so adding a word
+stays zero-manual for Kevin *and* instant.
+
+**Merge rule at load:** start from the committed baseline, then apply the
+local file on top — a local entry with the same `heard` (case-insensitive)
+overrides the baseline's `write`; new local `heard` entries are appended.
+`vocabulary.py`'s `load_vocabulary()` owns this merge. A malformed or
+missing local file is ignored with a stderr warning, never fatal.
 
 ## Pipeline integration
 
@@ -54,13 +69,15 @@ Current: `mic → Whisper (transcribe.py) → Ollama cleanup (cleanup.py) → pa
 ## Files
 
 **New**
-- `vocabulary.json` — the list
-- `vocabulary.py` — `load_vocabulary()`, `apply_vocabulary(text, entries)`,
+- `vocabulary.json` — the committed baseline list (repo root)
+- `vocabulary.py` — `load_vocabulary(baseline_path, local_path)` (reads +
+  merges both files), `apply_vocabulary(text, entries)`,
   `whisper_prompt(entries)`
 - `test_vocabulary.py`
 
 **Edit**
-- `main.py` — load the list at startup; call `apply_vocabulary()` between
+- `config.py` — resolve `<P2T_CONFIG_DIR>/vocabulary.json` path (mirrors `resolve_config_path()`)
+- `main.py` — load + merge both lists at startup; call `apply_vocabulary()` between
   `transcribe()` and `cleanup()`; build + pass the `initial_prompt`
 - `transcribe.py` — accept an `initial_prompt` and forward it to
   `model.transcribe(...)` (faster-whisper) and `mlx_whisper.transcribe(...)`
