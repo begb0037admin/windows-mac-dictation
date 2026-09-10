@@ -160,6 +160,9 @@ def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
             audio_input,
             language=whisper_config.get("language", "en"),
             beam_size=whisper_config.get("beam_size", 2),
+            # Personal vocabulary: the correct spellings, comma-joined, to
+            # bias the decoder toward them (see vocabulary.whisper_prompt).
+            initial_prompt=whisper_config.get("initial_prompt") or None,
             condition_on_previous_text=whisper_config.get(
                 "condition_on_previous_text", False
             ),
@@ -181,6 +184,9 @@ def transcribe(audio, sample_rate: int, whisper_config: dict) -> str:
             audio_input,
             path_or_hf_repo=model,
             language=whisper_config.get("language", "en"),
+            # Personal vocabulary: bias the decoder toward the correct
+            # spellings (see vocabulary.whisper_prompt).
+            initial_prompt=whisper_config.get("initial_prompt") or None,
             condition_on_previous_text=whisper_config.get(
                 "condition_on_previous_text", False
             ),

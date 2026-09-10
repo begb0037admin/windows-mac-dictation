@@ -8,8 +8,8 @@
 
 ```
 hold hotkey -> capture audio -> live partial transcript (feedback only)
-   -> release -> full transcribe (Whisper) -> cleanup (Ollama)
-   -> review (editable, in-app) -> send -> clipboard + simulated paste
+   -> release -> full transcribe (Whisper) -> personal-vocabulary replace
+   -> cleanup (Ollama) -> clipboard + simulated paste
 ```
 
 Only the "send" step touches the focused application. Everything before it is local to this app's own window.
@@ -20,6 +20,7 @@ Only the "send" step touches the focused application. Everything before it is lo
 |---|---|---|
 | `main.py` | `pywebview` window (frameless, transparent, `vibrancy=True`), `pynput` hotkey listener, `sounddevice` capture, `DictationAPI` JS bridge | same file, same class — platform branches only where required |
 | `transcribe.py` | `faster-whisper`, `small`, CUDA, fp16 | `mlx-whisper`, `small`, Metal, HF repo `mlx-community/whisper-small-mlx` |
+| `vocabulary.py` | personal-vocabulary list (`vocabulary.json` baseline, bundled, + optional `<P2T_CONFIG_DIR>/vocabulary.json` per machine, merged); deterministic whole-word replace on the raw transcript before cleanup, and the correct spellings fed to Whisper as `initial_prompt`. See `docs/VOCABULARY_BRIEF.md` | same |
 | `cleanup.py` | Ollama local REST API (`llama3.2:3b`), `<transcript>` tag guard, `temperature: 0` | same |
 | `inject.py` | clipboard + `Ctrl+V` via `pyperclip`/`pyautogui`; previous clipboard restored | clipboard verified, then `Cmd+V`; dictation remains on clipboard to prevent a stale-clipboard race and provide a manual-paste fallback |
 | `config.py` / `config.json` | resolves platform-keyed `hotkey`/`whisper` sections via `platform.system()`; shared `cleanup`/`sample_rate`/`theme`/`opacity`/`autostart` | same |

@@ -45,8 +45,9 @@ import sounddevice as sd
 from pynput import keyboard, mouse
 
 from cleanup import cleanup
-from config import CONFIG_PATH, load_config
+from config import CONFIG_PATH, load_config, resolve_vocabulary_local_path
 from inject import inject
+from vocabulary import apply_vocabulary, load_vocabulary, whisper_prompt
 from transcribe import (
     UnreliableTranscriptionError,
     has_repetition_loop,
@@ -107,6 +108,17 @@ config = load_config()
 config["whisper"] = _resolve_whisper_device(config["whisper"])
 SAMPLE_RATE = config["sample_rate"]
 HOTKEY_NAME = config["hotkey"]
+
+# Personal vocabulary (docs/VOCABULARY_BRIEF.md): committed baseline plus an
+# optional per-machine file, merged. Used twice - a deterministic
+# replacement pass on the raw transcript (see stop_recording()), and the
+# correct spellings fed to Whisper as initial_prompt to bias it up front.
+VOCABULARY = load_vocabulary(resolve_vocabulary_local_path())
+_vocabulary_prompt = whisper_prompt(VOCABULARY)
+if _vocabulary_prompt:
+    config["whisper"]["initial_prompt"] = _vocabulary_prompt
+    print(f"[vocabulary] {len(VOCABULARY)} entr{'y' if len(VOCABULARY) == 1 else 'ies'}; "
+          f"whisper prompt: {_vocabulary_prompt!r}")
 
 
 # A hotkey name prefixed "mouse_" resolves to a pynput.mouse.Button instead
@@ -1029,6 +1041,15 @@ def stop_recording():
         print(f"[transcribe] failed: {exc}", file=sys.stderr)
         push_status("error", f"Transcription failed: {exc}")
         return
+
+    # Personal-vocabulary replacement pass on the raw transcript, before the
+    # cleanup LLM sees it (so the LLM can't "correct" a fixed proper noun,
+    # and works from cleaner input). Deterministic; a no-op when the list is
+    # empty or nothing matches.
+    corrected = apply_vocabulary(text, VOCABULARY)
+    if corrected != text:
+        print(f"[vocabulary] {text!r} -> {corrected!r}")
+        text = corrected
 
     push_transcript(text)
     push_status("cleanup", "Cleaning up...")

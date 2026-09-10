@@ -284,7 +284,7 @@ $AppExe = $AppCandidates[0]
 $UnpackedDir = $AppExe.Directory.FullName
 $ResourcesDir = Join-Path $UnpackedDir 'resources'
 $ExpectedUiFiles = @('app.js', 'index.html', 'logo.svg', 'styles.css')
-foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\ptt-backend.exe', 'redist\vc_redist.x64.exe')) {
+foreach ($required in @('ui\index.html', 'ui\app.js', 'ui\styles.css', 'ui\logo.svg', 'backend\ptt-backend.exe', 'backend\_internal\vocabulary.json', 'redist\vc_redist.x64.exe')) {
     if (-not (Test-Path (Join-Path $ResourcesDir $required))) {
         Fail 19 "packaged inventory missing: resources\$required"
     }

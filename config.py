@@ -22,6 +22,20 @@ def resolve_config_path() -> Path:
     return Path(__file__).parent / "config.json"
 
 
+def resolve_vocabulary_local_path() -> Path:
+    """Per-machine personal-vocabulary overrides live next to config.json in
+    the writable config dir, under the same P2T_CONFIG_DIR contract as
+    resolve_config_path(): <P2T_CONFIG_DIR>/vocabulary.json when packaged,
+    otherwise a dev-only vocabulary.local.json beside this file (gitignored,
+    so it never collides with the committed baseline vocabulary.json). The
+    file is optional — vocabulary.load_vocabulary() treats an absent one as
+    "no local overrides"."""
+    config_dir = os.environ.get("P2T_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir) / "vocabulary.json"
+    return Path(__file__).parent / "vocabulary.local.json"
+
+
 def ensure_config_file(path: Path) -> Path:
     """SS5's exact steps: resolve the path (done by the caller), compute its
     parent, os.makedirs(parent, exist_ok=True) only when parent is non-empty

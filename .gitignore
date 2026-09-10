@@ -11,3 +11,8 @@ build/out/
 # personal convenience scripts, delivered via SendUserFile, not part of the app
 rundictation.bat
 rundemo.bat
+
+# dev-only per-machine personal-vocabulary overrides (config.py
+# resolve_vocabulary_local_path() dev fallback) - the committed baseline is
+# vocabulary.json; packaged installs use <P2T_CONFIG_DIR>/vocabulary.json
+vocabulary.local.json

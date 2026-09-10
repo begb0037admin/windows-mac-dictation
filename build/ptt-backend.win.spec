@@ -62,7 +62,9 @@ a = Analysis(
     [os.path.join(REPO_ROOT, 'main.py')],
     pathex=[REPO_ROOT],
     binaries=nvidia_binaries,
-    datas=[],
+    # vocabulary.json: the committed personal-vocabulary baseline, read at
+    # runtime from sys._MEIPASS by vocabulary._baseline_path().
+    datas=[(os.path.join(REPO_ROOT, 'vocabulary.json'), '.')],
     hiddenimports=[
         'faster_whisper',
         'ctranslate2',

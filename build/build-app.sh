@@ -299,7 +299,7 @@ if [ "${#APP_CANDIDATES[@]}" -gt 1 ]; then
 fi
 APP_BUNDLE="${APP_CANDIDATES[0]}"
 RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
-for required in ui/index.html ui/app.js ui/styles.css ui/logo.svg backend/ptt-backend backend/_internal/mlx/lib/mlx.metallib backend/_internal/mlx_whisper/assets/mel_filters.npz backend/_internal/mlx_whisper/assets/gpt2.tiktoken backend/_internal/mlx_whisper/assets/multilingual.tiktoken; do
+for required in ui/index.html ui/app.js ui/styles.css ui/logo.svg backend/ptt-backend backend/_internal/vocabulary.json backend/_internal/mlx/lib/mlx.metallib backend/_internal/mlx_whisper/assets/mel_filters.npz backend/_internal/mlx_whisper/assets/gpt2.tiktoken backend/_internal/mlx_whisper/assets/multilingual.tiktoken; do
     if [ ! -f "$RESOURCES_DIR/$required" ]; then
         fail 19 "packaged inventory missing: Contents/Resources/$required"
     fi

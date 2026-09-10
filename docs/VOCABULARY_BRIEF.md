@@ -1,8 +1,12 @@
 # Personal Vocabulary — feature brief
 
-> Status: **SPEC — approved, not yet built.** Kevin asked for this
-> 2026-09-10 after "Codex" kept transcribing as "codec". Two-file design
-> ("both") approved 2026-09-10. Windows pill rebuild is done; this is next.
+> Status: **BUILT 2026-09-10** (commit TBD), pending a build/install to
+> each machine + Kevin's live confirmation. Kevin asked for this after
+> "Codex" kept transcribing as "codec"; two-file design ("both") approved
+> the same day. Implementation matches this brief — see the code in
+> `vocabulary.py`, `main.py`, `transcribe.py`, `config.py`, and
+> `test_vocabulary.py` (13 cases). Baseline `vocabulary.json` currently
+> ships two entries: `codec` / `code x` -> `Codex`.
 
 ## Goal
 
@@ -104,3 +108,10 @@ Current: `mic → Whisper (transcribe.py) → Ollama cleanup (cleanup.py) → pa
 - `initial_prompt` can occasionally make Whisper echo or over-bias toward
   prompt words. It is the *help* layer only; the deterministic replace pass
   is the guarantee. Verify with real dictation after wiring.
+- `heard` keys should be word-ish (letters/digits, spaces between words). A
+  key that starts or ends with punctuation (e.g. `c++`) won't match cleanly
+  because of the `\b` anchors. None in the baseline; revisit `_pattern_for`
+  if such a term is ever needed.
+- Replacements are applied longest-key-first and are independent passes, so
+  a contrived list where one entry's `write` contains another entry's
+  `heard` could chain. Not a concern for a small curated proper-noun list.

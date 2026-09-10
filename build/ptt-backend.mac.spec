@@ -94,7 +94,11 @@ a = Analysis(
     ],
     pathex=[REPO_ROOT],
     binaries=mlx_dylibs,
-    datas=mlx_metallibs + mlx_whisper_assets,
+    # vocabulary.json: the committed personal-vocabulary baseline, read at
+    # runtime from sys._MEIPASS by vocabulary._baseline_path().
+    datas=mlx_metallibs + mlx_whisper_assets + [
+        (os.path.join(REPO_ROOT, 'vocabulary.json'), '.'),
+    ],
     hiddenimports=[
         'mlx_whisper',
         # mlx.core imports this dynamically while initializing its native
