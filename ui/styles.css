@@ -385,15 +385,17 @@ body.pill-mode .app {
    `.wave-bar`'s fixed width + the gaps) give the container a real,
    deterministic content width via `width: max-content`. */
 .pill-waveform {
-  flex: 0 0 auto;
-  width: max-content; /* sizes to its PILL_BAR_COUNT fixed-width bars + gaps
-     below - no duplicated bar-count formula to drift out of sync with
-     app.js's PILL_BAR_COUNT (Codex review, 2026-09-08) */
+  /* Kevin (2026-09-10): the waveform should span the full width of the
+     capsule, not sit as a short block in the middle. Fill the .pill-bar's
+     inner width and let space-between spread the PILL_BAR_COUNT bars edge
+     to edge. */
+  flex: 1 1 auto;
+  width: 100%;
   height: 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 1.5px;
+  justify-content: space-between;
+  gap: 1px;
   overflow: hidden;
 }
 

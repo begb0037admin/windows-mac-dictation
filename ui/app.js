@@ -15,9 +15,10 @@ const STATES = ['idle', 'recording', 'preparing-model', 'transcribing', 'cleanup
 // rightmost bars reading past the end of the array (undefined -> NaN
 // height), which froze them instead of scrolling like the rest.
 const FULL_BAR_COUNT = 54;
-// Kevin (2026-09-10): mini pill shrunk to a 116x38 window - fewer, thinner
-// bars so the waveform still fits its ~94px inner width.
-const PILL_BAR_COUNT = 16;
+// Kevin (2026-09-10): mini pill is a 116x38 window; the waveform spans the
+// full ~94px capsule interior (styles.css .pill-waveform uses
+// space-between), so enough thin bars to fill that width edge to edge.
+const PILL_BAR_COUNT = 24;
 let currentState = 'idle';
 let waveformBars = [];
 let pillBars = [];
@@ -266,33 +267,30 @@ function idleShimmerTick() {
   // cycle sits in "clearly solid" territory rather than "thin dash."
   //
   // Kevin (2026-09-09): the FULL view keeps exactly this look. Only the
-  // mini pill changes - see paintIdlePillEnvelope() below.
+  // mini pill changes - see paintIdlePillWave() below.
   for (let i = 0; i < waveformBars.length; i++) {
     const frac = (i / waveformBars.length) * WAVE_PHASE_SCALE;
     const synthetic = 0.2 + 0.14 * Math.sin(now / 900 + frac * 0.15);
     paintBar(waveformBars[i], shapeLevel(synthetic, i, waveformBars.length, now), 60, 4, i, waveformBars.length, true);
   }
-  paintIdlePillEnvelope();
+  paintIdlePillWave();
   // No requestAnimationFrame reschedule - idle is a fixed, single frame.
 }
 
-// Kevin (2026-09-09): mini pill idle only. The old shared path froze
-// shapeLevel()'s animated two-term wobble at a random phase every time
-// idle appeared - scattered, lopsided spikes. The pill now paints a
-// deterministic, left/right-symmetric centre-weighted envelope: an even
-// dot row across both outer thirds rising to a short tall cluster in the
-// middle, with a gentle fixed per-bar ripple so the peak reads as a little
-// waveform burst rather than one bald arc. Same shape every time - no
-// `now`, no randomness. Full view and active recording are untouched.
-function paintIdlePillEnvelope() {
+// Kevin (2026-09-10): mini pill idle only, and STILL (no animation - idle
+// was deliberately frozen 2026-09-08 for CPU). Bar heights trace a
+// "beating" / AM waveform across the full width of the capsule: a fast
+// carrier sine modulated by one slow half-cycle envelope hump, so it
+// reads as a real audio wave rather than a smooth blob. Deterministic -
+// same frame every time, no `now`, no randomness. Full view and active
+// recording are untouched.
+function paintIdlePillWave() {
   const count = pillBars.length;
-  const center = (count - 1) / 2;
-  const SIGMA = 0.20; // fraction of half-width; smaller = tighter centre cluster
   for (let i = 0; i < count; i++) {
-    const d = (i - center) / (count / 2); // -1 .. 1 across the view
-    const bell = Math.exp(-(d * d) / (2 * SIGMA * SIGMA));
-    const ripple = 0.68 + 0.32 * Math.abs(Math.sin(i * 1.1));
-    const level = bell * ripple * 0.95;
+    const t = count > 1 ? i / (count - 1) : 0.5; // 0 .. 1 across the view
+    const envelope = 0.5 + 0.5 * Math.sin(t * Math.PI);      // slow hump, 0 at both ends
+    const carrier = 0.5 + 0.5 * Math.sin(t * Math.PI * 9);   // fast oscillation
+    const level = Math.min(1, 0.12 + envelope * carrier);
     paintBar(pillBars[i], level, 16, 3, i, count, true);
     // Flat charcoal, not chromeColor()'s frozen Date.now() shimmer (which
     // read as a mottled light/dark bar row on a static frame). Only a
