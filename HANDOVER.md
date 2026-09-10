@@ -6,10 +6,26 @@
 
 **Also this session: the Oxford work laptop (`oxford-lan`, `101L-DE013193`) is reachable for the first time.** Kevin logged in locally as the admin account `begb0037-a`, enabled OpenSSH Server, and (since that account is a local admin — Windows OpenSSH ignores the per-user `authorized_keys` for admin accounts) added this Mac's mesh public key to `C:\ProgramData\ssh\administrators_authorized_keys` with `SYSTEM`+`Administrators`-only grants. `ssh oxford-lan` now works from this Mac (added to `~/.ssh/config`). **Its default remote shell is plain Windows PowerShell, not PowerShell Core/cmd like the other three machines — no `&&`/`;` compound-command assumptions, same "write a .ps1, scp it, run with -File" rule applies even harder here.** Has Node.js v24.19.0 + Python 3.12.10 (not 3.14 like the other machines — the lock files were pip-compiled against 3.14; watch for wheel/hash mismatches on first build) and an existing `windows-mac-dictation` clone at `C:\Users\begb0037-a\github\windows-mac-dictation`, but **no PTT installed at all yet** — this is a genuine first-time build+install, done directly from current `main` so it ships with the resize fix from day one (no separate old-build-then-patch step needed).
 
-**Kevin went AFK ~23:00, asked to continue without him until completion.** In progress when he left, both backgrounded:
-1. Laptop: resize-fix (`630f9f2`) rebuild — install once the installer lands.
-2. Oxford-lan: first-time build from `main` @ `630f9f2` — install once done, launch, confirm bundle (vocabulary.json, resize fix), no re-grant needed (Windows).
-Then: Tablet gets the same resize-fix installer (reuse whichever Windows build finishes — Laptop's or Oxford-lan's — same trick as the vocab rollout, no need to rebuild per machine). Update this file + memory again once all four Windows-side items land.
+**Kevin went AFK ~23:00, asked to continue without him until completion.**
+1. **Oxford-lan: first-time build SUCCEEDED** (`0.1.3-20260910T220351866Z-630f9f2`, Python 3.12.10 there
+   built cleanly against the 3.14-compiled lock — no wheel/hash issues). **Install attempt then hit a
+   real blocker: the 1Password SSH agent started refusing to sign** (`agent refused operation` /
+   `communication with agent failed`) for **every** SSH alias, not just this one — confirmed by testing
+   `laptop` too. This is Kevin's Mac/1Password locking while he's away, not a per-machine problem.
+   **No workaround exists or should be attempted** (this is exactly the credential/security boundary an
+   agent must not try to bypass) - SSH to any of Kevin's machines is unavailable until his Mac/1Password
+   unlocks again (he returns, or some unlock event). The built installer is sitting ready at that path on
+   oxford-lan; installing it is a 30-second job once SSH comes back.
+2. **Laptop: resize-fix (`630f9f2`) rebuild** - was polling for the installer when the agent lock hit;
+   the poll loop degrades to harmless no-op retries under the lock and will pick back up on its own once
+   SSH works again. Check its actual state fresh rather than trusting the poll blindly.
+3. **Tablet:** still needs the resize-fix installer (reuse whichever Windows build finishes first -
+   Laptop's or oxford-lan's - no need to rebuild per machine, same trick as the vocab rollout).
+4. **Mac:** resize fix already installed, `tccutil reset` done - just needs Kevin's re-grant toggle,
+   unaffected by the SSH agent lock (that part never needed SSH).
+
+**Next session/wakeup: check whether SSH access has returned (`ssh laptop echo test` or similar) before
+resuming any of 1-3.** If still locked, don't keep retrying aggressively - space out checks.
 
 **Previously last updated:** 2026-09-10 (later still) — **Kevin asked to roll today's full update (mini-pill redesign + Personal Vocabulary, all on `main` @ `ceafb67`) out to every machine — the Desktop, and now also the Laptop, the Tablet, and a separate work laptop. Paused for Kevin's usage limit; resume ~18:00 2026-09-10. TODO, in order:**
 1. **Laptop — DONE 2026-09-10 21:xx.** Build from `ceafb67` had actually finished (14:09) by the time the session resumed; installed silently (`/S`, exit 0), relaunched. Bundled `vocabulary.json` verified, backend smoke printed `[vocabulary] 2 entries; whisper prompt: 'Codex'`. Note: this laptop has **no NVIDIA GPU** — `main.py` auto-falls-back to CPU transcription (expected, same as the 2026-08-24 GPU-less-laptop fix; not an error). Not yet Kevin-confirmed live.
