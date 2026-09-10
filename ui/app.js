@@ -15,7 +15,9 @@ const STATES = ['idle', 'recording', 'preparing-model', 'transcribing', 'cleanup
 // rightmost bars reading past the end of the array (undefined -> NaN
 // height), which froze them instead of scrolling like the rest.
 const FULL_BAR_COUNT = 54;
-const PILL_BAR_COUNT = 24;
+// Kevin (2026-09-10): mini pill shrunk to a 116x38 window - fewer, thinner
+// bars so the waveform still fits its ~94px inner width.
+const PILL_BAR_COUNT = 16;
 let currentState = 'idle';
 let waveformBars = [];
 let pillBars = [];
@@ -211,7 +213,7 @@ function updateAudioLevel(rms) {
   // "because the pill is smaller we need to increase the animation."
   for (let i = 0; i < pillBars.length; i++) {
     const level = audioLevels[i * 2] || 0;
-    paintBar(pillBars[i], shapeLevel(level, i, pillBars.length, now, PILL_ANIMATION_BOOST), 20, 3, i, pillBars.length);
+    paintBar(pillBars[i], shapeLevel(level, i, pillBars.length, now, PILL_ANIMATION_BOOST), 16, 3, i, pillBars.length);
   }
 }
 
@@ -291,7 +293,7 @@ function paintIdlePillEnvelope() {
     const bell = Math.exp(-(d * d) / (2 * SIGMA * SIGMA));
     const ripple = 0.68 + 0.32 * Math.abs(Math.sin(i * 1.1));
     const level = bell * ripple * 0.95;
-    paintBar(pillBars[i], level, 20, 3, i, count, true);
+    paintBar(pillBars[i], level, 16, 3, i, count, true);
     // Flat charcoal, not chromeColor()'s frozen Date.now() shimmer (which
     // read as a mottled light/dark bar row on a static frame). Only a
     // slight lift with bar height.
@@ -320,8 +322,8 @@ function stopIdleShimmer() {
 // ── State management ──
 
 // Short labels for the mini pill's status text — the full status text is
-// too long for a 170px-wide pill, so this is a separate, deliberately
-// terse mapping.
+// far too long for the 116px-wide pill, so this is a separate,
+// deliberately terse mapping.
 const PILL_STATUS_TEXT = {
   'preparing-model': 'Preparing…',
   transcribing: 'Transcribing…',
@@ -518,10 +520,10 @@ async function enablePillMode() {
   dom.app.classList.add('mode-pill');
   document.body.classList.add('pill-mode');
   if (window.electronAPI) {
-    window.electronAPI.resizeWindow(170, 56);
+    window.electronAPI.resizeWindow(116, 38);
   } else if (window.pywebview && window.pywebview.api) {
     try {
-      await pywebview.api.set_window_size(170, 56, true);
+      await pywebview.api.set_window_size(116, 38, true);
     } catch (e) {
       console.error('Failed to resize window to pill mode:', e);
     }

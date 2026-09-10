@@ -83,7 +83,9 @@ body {
    most of it (a 56px-tall pill window was left with ~24px of usable
    height). Give the pill its own, much tighter margin. */
 body.pill-mode {
-  margin: 5px;
+  /* Kevin (2026-09-10): pill window is now 116x38 - keep the margin tiny so
+     the capsule keeps as much of that as possible. */
+  margin: 3px;
 }
 
 /* ── Opacity & Glassmorphism Modes ── */
@@ -306,8 +308,8 @@ body.pill-mode .app {
      capsule's size or shape between notifications. */
   width: 100%;
   height: 100%;
-  padding: 0 18px;
-  gap: 14px;
+  padding: 0 8px;
+  gap: 8px;
   border-radius: 999px;
   background-color: var(--pill-idle);
   color: var(--pill-idle-ink);
@@ -375,34 +377,29 @@ body.pill-mode .app {
   box-shadow: none;
 }
 
-/* Kevin (2026-09-08) / Codex review: this used to be `flex: 1` inside a
-   `width: 100%` .pill-bar, which worked because the parent had a definite
-   width to grow into. Now that .pill-bar sizes itself to fit-content (see
-   .pill-bar's own comment), `flex: 1` on an empty div gives the flexbox
-   intrinsic-sizing algorithm nothing real to measure - `max-width` caps a
-   size, it does not create one, so the bars (and this container) could
-   collapse toward zero width instead of showing anything. Explicit fixed
-   widths below (matching PILL_BAR_COUNT in app.js: 24 bars * 2.5px +
-   23 gaps * 2px) make the container's real, deterministic content width
-   there for .pill-bar's fit-content to measure - not visually different
-   from before (the bars were already effectively capped at 2.5px each),
-   just no longer dependent on an intrinsic-sizing edge case. */
+/* Kevin (2026-09-08) / Codex review: this used to be `flex: 1` on an empty
+   div, which gave the flexbox intrinsic-sizing algorithm nothing real to
+   measure - `max-width` caps a size, it does not create one, so the bars
+   (and this container) could collapse toward zero width instead of showing
+   anything. The explicit per-bar widths below (PILL_BAR_COUNT bars of
+   `.wave-bar`'s fixed width + the gaps) give the container a real,
+   deterministic content width via `width: max-content`. */
 .pill-waveform {
   flex: 0 0 auto;
-  width: max-content; /* sizes to its 24 fixed-width bars + gaps below - no
-     duplicated bar-count formula to drift out of sync with app.js's
-     PILL_BAR_COUNT (Codex review, 2026-09-08) */
-  height: 28px;
+  width: max-content; /* sizes to its PILL_BAR_COUNT fixed-width bars + gaps
+     below - no duplicated bar-count formula to drift out of sync with
+     app.js's PILL_BAR_COUNT (Codex review, 2026-09-08) */
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1.5px;
   overflow: hidden;
 }
 
 .pill-waveform .wave-bar {
-  flex: 0 0 2.5px;
-  width: 2.5px;
+  flex: 0 0 2px;
+  width: 2px;
   height: 6px;
   min-height: 3px;
   border-radius: 99px;
@@ -422,7 +419,7 @@ body.pill-mode .app {
      fit-content-based rather than a fixed 100%, so a long status string
      can't force the pill wider than max-width allows. */
   min-width: 0;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   /* Follows .pill-bar's own colour, which changes with state (neutral /
      purple / green) - Kevin 2026-09-09. */
