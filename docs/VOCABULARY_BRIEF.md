@@ -1,7 +1,9 @@
 # Personal Vocabulary — feature brief
 
-> Status: **BUILT 2026-09-10** (commit TBD), pending a build/install to
-> each machine + Kevin's live confirmation. Kevin asked for this after
+> Status: **SHIPPED 2026-09-10** (`88ca71f`) — built and installed on both
+> the Mac and the Windows Desktop; frozen-backend smoke on both prints
+> `[vocabulary] 2 entries; whisper prompt: 'Codex'`. Pending Kevin's live
+> dictation confirmation. Kevin asked for this after
 > "Codex" kept transcribing as "codec"; two-file design ("both") approved
 > the same day. Implementation matches this brief — see the code in
 > `vocabulary.py`, `main.py`, `transcribe.py`, `config.py`, and
