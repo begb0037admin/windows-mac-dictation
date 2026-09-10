@@ -365,12 +365,39 @@ ipcMain.on('backend-command', (event, cmd) => {
   }
 });
 
-ipcMain.on('resize-window', (event, width, height) => {
+// handle (not on/send): the renderer awaits this before flipping the
+// mode-pill/pill-mode CSS classes, which size .app off 100vh - see
+// ui/app.js's enablePillMode/disablePillMode for why the ordering matters.
+ipcMain.handle('resize-window', (event, width, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
+  const targetWidth = Math.round(width);
+  const targetHeight = Math.round(height);
   // Mode switches are the only legitimate size changes. Dragging is
   // Electron's native app-region operation and never reaches this handler.
-  win.setSize(Math.round(width), Math.round(height));
+  win.setSize(targetWidth, targetHeight);
+  // Kevin reported the pill rendering as an oversized black circle on the
+  // Windows laptop (2026-09-10) - the exact symptom from the 10-11 Aug /
+  // 4 Sep reports: on this frameless/transparent/alwaysOnTop/
+  // resizable:false window, setSize() can silently no-op (confirmed live,
+  // 2026-09-04, via main-process getBounds() timestamps across repeated
+  // real toggles - reliable from the second Full<->Pill toggle onward in a
+  // session). The renderer used to fire-and-forget this IPC call and flip
+  // straight to border-radius:999px on a window that hadn't actually
+  // resized. setBounds() with an explicit target rect has been
+  // live-verified to succeed every time setSize() alone didn't - use it as
+  // a fallback whenever the resize didn't actually take effect, and log it
+  // so a repeat is diagnosable from backend.log without re-deriving this.
+  const actual = win.getSize();
+  if (actual[0] !== targetWidth || actual[1] !== targetHeight) {
+    const { x, y } = win.getBounds();
+    win.setBounds({ x, y, width: targetWidth, height: targetHeight });
+    appendLog('main', sanitizeStderrLine(`P2T_DIAG ${JSON.stringify({
+      code: 'RESIZE_SETSIZE_NOOP',
+      wanted: [targetWidth, targetHeight],
+      got: actual,
+    })}`));
+  }
 });
 
 ipcMain.on('close-window', (event) => {

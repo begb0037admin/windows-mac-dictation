@@ -7,7 +7,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 // are the JSON-lines pipe to the Python backend (see main.py's module
 // docstring / electron/main.js).
 contextBridge.exposeInMainWorld('electronAPI', {
-  resizeWindow: (width, height) => ipcRenderer.send('resize-window', width, height),
+  // invoke, not send: the renderer must know the native resize has actually
+  // happened before it flips CSS classes that size themselves off 100vh
+  // (mode-pill/pill-mode) - see electron/main.js's resize-window handler.
+  resizeWindow: (width, height) => ipcRenderer.invoke('resize-window', width, height),
   closeWindow: () => ipcRenderer.send('close-window'),
   openMacAccessibilitySettings: () => ipcRenderer.send('open-accessibility-settings'),
   sendCommand: (cmd) => ipcRenderer.send('backend-command', cmd),
