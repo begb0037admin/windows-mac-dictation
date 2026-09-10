@@ -19,6 +19,16 @@ const FULL_BAR_COUNT = 54;
 // full ~94px capsule interior (styles.css .pill-waveform uses
 // space-between), so enough thin bars to fill that width edge to edge.
 const PILL_BAR_COUNT = 24;
+
+// Kevin (2026-09-10): the Mac's mic input runs quieter than the Windows
+// desktop's, so the same RMS -> bar-height scale made the live recording
+// waveform look noticeably flatter on Mac. Give Mac a bigger boost so its
+// animation is as lively as Windows'. Visualisation only - the audio sent
+// to Whisper is unchanged. Tune the Mac value if it's still under/over.
+const IS_MAC = typeof navigator !== 'undefined'
+  && navigator.platform.toUpperCase().includes('MAC');
+const RMS_BOOST = IS_MAC ? 34 : 18;
+
 let currentState = 'idle';
 let waveformBars = [];
 let pillBars = [];
@@ -189,8 +199,10 @@ function updateAudioLevel(rms) {
   // Kevin (2026-07-30): bars still weren't using the container's available
   // height at normal speaking volume - pushed the boost/compression much
   // further so typical speech pins close to the ceiling, not just a
-  // "visible but small" swing.
-  const boosted = Math.pow(Math.min(1, rms * 18), 0.4);
+  // "visible but small" swing. RMS_BOOST is per-platform (see its comment
+  // near the top) - higher on Mac to match the Windows desktop's livelier
+  // animation, Kevin 2026-09-10.
+  const boosted = Math.pow(Math.min(1, rms * RMS_BOOST), 0.4);
   audioLevels.shift();
   audioLevels.push(boosted);
 
