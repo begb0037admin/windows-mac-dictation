@@ -323,6 +323,11 @@ body.pill-mode .app {
   cursor: move;
   transition: background-color 0.28s ease, color 0.28s ease;
   -webkit-app-region: drag;
+  /* Stops the browser's own default touch handling (scroll/pan/zoom) from
+     intercepting a touch gesture before app.js's pointerdown/move/up
+     handlers see it - standard requirement for custom pointer-driven
+     drag/tap on a touch digitizer. Harmless on mouse-only machines. */
+  touch-action: none;
 }
 
 /* Kevin reported the Tablet's pill "stuck on red, not responsive"
