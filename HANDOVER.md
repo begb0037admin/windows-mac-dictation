@@ -35,11 +35,10 @@ autonomously per his "continue without me" instruction. Resize-fix (`630f9f2`) r
   `main` @ `630f9f2` (started before the SSH lock) had already succeeded; installed once SSH came back.
   Bundled vocab + resize-fix verified, CPU/int8 fallback (no GPU), PTT running. **First machine set up
   with the resize-fix included from day one - no separate old-build-then-patch step was needed.**
-- ⏳ **Tablet** - pushing the Laptop's already-built `630f9f2` installer across now (same trick as the
-  vocab rollout - no rebuild needed, it's the identical Windows x64 artifact).
-- ⏳ **Desktop** - still on the vocab-only build (`88ca71f`), never got the resize-fix build (deprioritised
-  behind Laptop/Tablet per Kevin's explicit call mid-session - "why on the mac, the issue is laptop and
-  tablet"). Needs the same `630f9f2` installer (reuse the Laptop's/Oxford-lan's build, don't rebuild).
+- ✅ **Desktop** - built fresh from `main` @ `e78badc` (includes the resize fix), installed, bundled vocab
+  + resize-fix verified, CUDA path confirmed active, PTT running.
+- ⏳ **Tablet** - pushing the Laptop's already-built `630f9f2` installer across (large transfer, still in
+  flight) - same trick as the vocab rollout, no rebuild needed, identical Windows x64 artifact.
 
 **Lesson for any future SSH-agent lockout:** the 1Password SSH agent refusing to sign for every
 alias at once (not just one host) means Kevin's Mac/vault is locked, not a per-machine problem - don't
