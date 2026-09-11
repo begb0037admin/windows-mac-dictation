@@ -28,6 +28,12 @@
   --pill-purple-ink: #0e0a24;
   --pill-green: #6ce2b6;
   --pill-green-ink: #08241b;
+  /* Kevin (2026-09-11): recording itself now turns the pill red too (was
+     neutral) - solid while a single tap/hold is recording, slow-flashing
+     between these two reds while a double-tap has it locked on. */
+  --pill-red: #f87171;
+  --pill-red-dim: #b23a3a;
+  --pill-red-ink: #2a0b0b;
   --gradient-wave: linear-gradient(180deg, #5eead4, #a78bfa, #f472b6);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.24), transparent 19rem);
   --shadow-brand: 0 8px 20px rgba(17, 24, 39, 0.3);
@@ -58,6 +64,9 @@
   --pill-purple-ink: #f3efff;
   --pill-green: #0d9668;
   --pill-green-ink: #eafff6;
+  --pill-red: #dc2626;
+  --pill-red-dim: #7f1d1d;
+  --pill-red-ink: #fff0f0;
   --gradient-wave: linear-gradient(180deg, #0e7490, #0d9668);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.08), transparent 19rem);
   --shadow-brand: 0 8px 20px rgba(0, 0, 0, 0.1);
@@ -319,9 +328,16 @@ body.pill-mode .app {
   -webkit-app-region: drag;
 }
 
-/* Pill state fills. idle + recording keep the neutral capsule (with the
-   live waveform); the processing states go purple; paste goes green -
-   all in the same fixed-size capsule. */
+/* Pill state fills. idle keeps the neutral capsule (with the live
+   waveform); recording goes red (solid, or slow-flashing once locked -
+   see .recording-locked below); the processing states go purple; paste
+   goes green - all in the same fixed-size capsule. Waveform bar colours
+   are unchanged either way (painted separately in app.js) - only the
+   capsule background/ink changes. */
+.app.state-recording .pill-bar {
+  background-color: var(--pill-red);
+  color: var(--pill-red-ink);
+}
 .app.state-preparing-model .pill-bar,
 .app.state-transcribing .pill-bar,
 .app.state-cleanup .pill-bar {
@@ -333,10 +349,33 @@ body.pill-mode .app {
   color: var(--pill-green-ink);
 }
 
-/* A native drag region deliberately does not dispatch DOM clicks. Keep one
-   small no-drag control for returning from the pill to the full view.
-   Absolutely positioned (see .pill-bar comment above) - hidden by default,
-   fades in on hover only. */
+/* Kevin (2026-09-11): double-tap-locked recording slow-flashes between the
+   two reds instead of sitting solid, so a deliberately-pinned recording
+   reads differently from a normal single-tap/held one at a glance. */
+@keyframes pill-locked-flash {
+  0%, 100% { background-color: var(--pill-red); }
+  50% { background-color: var(--pill-red-dim); }
+}
+.app.recording-locked .pill-bar {
+  animation: pill-locked-flash 1.8s ease-in-out infinite;
+}
+
+/* Kevin (2026-09-11): tap-to-record for touch (the Tablet has no physical
+   hotkey to hold) - "not need for a button... just tap on the pill should
+   be enough". No separate icon/button: ui/app.js listens for 'click'
+   directly on .pill-bar. Recording state is signalled purely by the
+   capsule's own colour (solid red / slow-flashing red once locked, see
+   below) - no dot needed either, since there's no icon left to put one on.
+   .pill-bar stays -webkit-app-region: drag throughout ("we must separate
+   dragging from tapping... dragging is moving, tapping is not") - see
+   app.js's own comment on the click handler for why a plain click listener
+   is enough without custom drag-threshold code. */
+
+/* A native drag region deliberately does not dispatch DOM clicks for a
+   real drag gesture. Keep one small no-drag control for returning from the
+   pill to the full view - a plain yellow dot, hover-reveal only (mouse
+   platforms; the Tablet's way back to full view is a separate concern, not
+   this control). Absolutely positioned (see .pill-bar comment above). */
 .pill-expand {
   -webkit-app-region: no-drag;
   position: absolute;
@@ -351,11 +390,10 @@ body.pill-mode .app {
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: var(--ink-dim);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--transition), background var(--transition), color var(--transition);
+  transition: opacity var(--transition), background var(--transition);
 }
 
 .pill-bar:hover .pill-expand {
@@ -363,9 +401,15 @@ body.pill-mode .app {
   pointer-events: auto;
 }
 
+.pill-expand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fbbf24;
+}
+
 .pill-expand:hover {
   background: rgba(255, 255, 255, 0.12);
-  color: var(--ink);
 }
 
 .theme-light .pill-expand:hover {

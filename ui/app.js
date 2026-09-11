@@ -59,6 +59,7 @@ function cacheDom() {
     btnSettings: document.getElementById('btnSettings'),
     btnBack: document.getElementById('btnBack'),
     btnPillExpand: document.getElementById('btnPillExpand'),
+    pillBar: document.getElementById('pillBar'),
     // Settings fields
     settingTheme: document.getElementById('settingTheme'),
     settingOpacity: document.getElementById('settingOpacity'),
@@ -424,6 +425,7 @@ function updateStatus(state, text) {
   if (state === 'idle') {
     resetWaveform();
     startIdleShimmer();
+    setPillTapLocked(false);
   } else {
     stopIdleShimmer();
   }
@@ -521,6 +523,69 @@ function dismissAppError() {
   if (!dom.appError) return;
   if (dom.appError.classList.contains('severity-fatal')) return; // non-dismissible
   dom.appError.classList.remove('visible');
+}
+
+// ── Touch trigger (pill tap-to-record) ──
+
+// Kevin (2026-09-11): the tablet has no physical hotkey to hold, so tapping
+// the pill itself (no separate button/icon - "just tap on the pill should
+// be enough") drives the same start_recording()/stop_recording() the
+// physical hotkey does, via new start_recording/stop_recording backend
+// commands (main.py's handle_command()). This is an additional trigger
+// source alongside the keyboard/mouse hotkey, not a replacement.
+//
+// The pill is still -webkit-app-region: drag (so it can be repositioned -
+// "we must separate dragging from tapping... dragging is moving, tapping
+// is not"). A native drag region does not reliably dispatch a `click`
+// once the OS has recognised an actual drag, but a genuine stationary tap
+// (no real pointer movement) still does - so a plain 'click' listener on
+// the pill is the tap handler, and no custom pointer-move-threshold
+// dragging code was written. If real hardware testing ever shows taps
+// getting swallowed here, that's the first thing to revisit.
+const DOUBLE_TAP_MS = 300;
+let lastPillTapAt = 0;
+
+function sendRecordingCommand(cmd) {
+  if (window.electronAPI) {
+    window.electronAPI.sendCommand({ cmd });
+  }
+}
+
+function setPillTapLocked(locked) {
+  // Drives the pill capsule's slow-flash (styles.css .recording-locked) -
+  // Kevin (2026-09-11): no separate tap icon/badge - the pill's own colour
+  // (solid red vs slow-flashing red) is the only signal, both for "is it
+  // recording" and "is it locked on".
+  if (dom.app) dom.app.classList.toggle('recording-locked', locked);
+}
+
+// Tap while idle starts recording; tap while recording stops it (same
+// pipeline as releasing the hotkey). Double-tap while idle also starts
+// recording, but shows a lock badge so it's visually obvious it's pinned
+// on rather than accidentally left running - since the second tap of a
+// double-tap can land before or after the backend's own 'recording'
+// status confirmation comes back, treat a same-pair second tap as "lock
+// it" even if currentState has already flipped to 'recording' by then,
+// rather than racily stopping the very recording the pair just started.
+function handlePillTap() {
+  const now = Date.now();
+  const isSecondTapOfPair = now - lastPillTapAt < DOUBLE_TAP_MS;
+  lastPillTapAt = now;
+
+  if (currentState === 'recording') {
+    if (isSecondTapOfPair) {
+      setPillTapLocked(true);
+    } else {
+      sendRecordingCommand('stop_recording');
+      setPillTapLocked(false);
+    }
+    return;
+  }
+
+  if (currentState !== 'idle') return; // nothing useful to start/stop mid-pipeline
+
+  sendRecordingCommand('start_recording');
+  setPillTapLocked(isSecondTapOfPair);
 }
 
 // ── Pill / Mini Bar Mode ──
@@ -799,6 +864,7 @@ function init() {
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
   if (dom.btnPillExpand) dom.btnPillExpand.addEventListener('click', disablePillMode);
+  if (dom.pillBar) dom.pillBar.addEventListener('click', handlePillTap);
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
     if (window.electronAPI) {
       window.electronAPI.closeWindow();

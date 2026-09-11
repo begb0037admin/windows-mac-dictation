@@ -447,6 +447,16 @@ def handle_command(cmd):
                 "type": "settings_error",
                 "message": f"Could not save settings: {exc}",
             })
+    elif action == "start_recording":
+        # Touch trigger (Kevin, 2026-09-11): tap-to-record on the tablet,
+        # alongside the physical hotkey - not a replacement for it. Same
+        # entry point on_press() uses; start_recording() already no-ops
+        # outside IDLE, so a stray double-fire from the UI is harmless.
+        start_recording()
+    elif action == "stop_recording":
+        # Run off the stdin-reader thread, same as on_release() does -
+        # stop_recording() blocks on stream teardown/transcription kickoff.
+        threading.Thread(target=stop_recording, daemon=True).start()
     else:
         print(f"[stdin] unknown command: {action!r}", file=sys.stderr)
 
