@@ -24,8 +24,26 @@
 4. **Mac:** resize fix already installed, `tccutil reset` done - just needs Kevin's re-grant toggle,
    unaffected by the SSH agent lock (that part never needed SSH).
 
-**Next session/wakeup: check whether SSH access has returned (`ssh laptop echo test` or similar) before
-resuming any of 1-3.** If still locked, don't keep retrying aggressively - space out checks.
+**Update 2026-09-11 ~07:50: SSH access returned (Kevin's Mac/1Password unlocked overnight), resumed
+autonomously per his "continue without me" instruction. Resize-fix (`630f9f2`) rollout status:**
+- ✅ **Mac** - installed, `tccutil reset` done, awaiting Kevin's re-grant toggle (unaffected by the SSH
+  lock all along).
+- ✅ **Laptop** - resize-fix build (queued before the SSH lock) completed and installed. Bundled
+  `vocabulary.json` + resize-fix verified, backend smoke shows `[vocabulary] 2 entries`, CPU/int8
+  fallback confirmed (no GPU), PTT running.
+- ✅ **Oxford-lan** (`101L-DE013193`, first PTT install ever on this machine) - the first-time build from
+  `main` @ `630f9f2` (started before the SSH lock) had already succeeded; installed once SSH came back.
+  Bundled vocab + resize-fix verified, CPU/int8 fallback (no GPU), PTT running. **First machine set up
+  with the resize-fix included from day one - no separate old-build-then-patch step was needed.**
+- ⏳ **Tablet** - pushing the Laptop's already-built `630f9f2` installer across now (same trick as the
+  vocab rollout - no rebuild needed, it's the identical Windows x64 artifact).
+- ⏳ **Desktop** - still on the vocab-only build (`88ca71f`), never got the resize-fix build (deprioritised
+  behind Laptop/Tablet per Kevin's explicit call mid-session - "why on the mac, the issue is laptop and
+  tablet"). Needs the same `630f9f2` installer (reuse the Laptop's/Oxford-lan's build, don't rebuild).
+
+**Lesson for any future SSH-agent lockout:** the 1Password SSH agent refusing to sign for every
+alias at once (not just one host) means Kevin's Mac/vault is locked, not a per-machine problem - don't
+re-diagnose individual hosts, just wait and periodically retry a single cheap `ssh <alias> echo ok`.
 
 **Previously last updated:** 2026-09-10 (later still) — **Kevin asked to roll today's full update (mini-pill redesign + Personal Vocabulary, all on `main` @ `ceafb67`) out to every machine — the Desktop, and now also the Laptop, the Tablet, and a separate work laptop. Paused for Kevin's usage limit; resume ~18:00 2026-09-10. TODO, in order:**
 1. **Laptop — DONE 2026-09-10 21:xx.** Build from `ceafb67` had actually finished (14:09) by the time the session resumed; installed silently (`/S`, exit 0), relaunched. Bundled `vocabulary.json` verified, backend smoke printed `[vocabulary] 2 entries; whisper prompt: 'Codex'`. Note: this laptop has **no NVIDIA GPU** — `main.py` auto-falls-back to CPU transcription (expected, same as the 2026-08-24 GPU-less-laptop fix; not an error). Not yet Kevin-confirmed live.
