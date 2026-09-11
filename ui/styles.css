@@ -328,16 +328,12 @@ body.pill-mode .app {
   -webkit-app-region: drag;
 }
 
-/* Pill state fills. idle keeps the neutral capsule (with the live
-   waveform); recording goes red (solid, or slow-flashing once locked -
-   see .recording-locked below); the processing states go purple; paste
-   goes green - all in the same fixed-size capsule. Waveform bar colours
-   are unchanged either way (painted separately in app.js) - only the
-   capsule background/ink changes. */
-.app.state-recording .pill-bar {
-  background-color: var(--pill-red);
-  color: var(--pill-red-ink);
-}
+/* Pill state fills. idle + recording keep the neutral capsule (with the
+   live waveform) on every machine except touch devices (see below) - the
+   processing states go purple; paste goes green - all in the same
+   fixed-size capsule. Waveform bar colours are unchanged either way
+   (painted separately in app.js) - only the capsule background/ink
+   changes. */
 .app.state-preparing-model .pill-bar,
 .app.state-transcribing .pill-bar,
 .app.state-cleanup .pill-bar {
@@ -349,14 +345,25 @@ body.pill-mode .app {
   color: var(--pill-green-ink);
 }
 
-/* Kevin (2026-09-11): double-tap-locked recording slow-flashes between the
-   two reds instead of sitting solid, so a deliberately-pinned recording
-   reads differently from a normal single-tap/held one at a glance. */
+/* Kevin (2026-09-11): "red pill only on tablet, ipad and mobile - not
+   other machines" - the red/flashing-red recording pill is feedback for
+   the tap gesture (see app.js's IS_TOUCH_DEVICE / .touch-device class),
+   so it only shows on touch devices. Every other machine's recording pill
+   stays the original neutral capsule with the aurora waveform (Kevin,
+   2026-09-09: "do not change current recording, active moving aurora
+   colours") - untouched by any of this. Double-tap-locked recording
+   slow-flashes between the two reds instead of sitting solid, so a
+   deliberately-pinned recording reads differently from a normal
+   single-tap one at a glance. */
+.app.touch-device.state-recording .pill-bar {
+  background-color: var(--pill-red);
+  color: var(--pill-red-ink);
+}
 @keyframes pill-locked-flash {
   0%, 100% { background-color: var(--pill-red); }
   50% { background-color: var(--pill-red-dim); }
 }
-.app.recording-locked .pill-bar {
+.app.touch-device.recording-locked .pill-bar {
   animation: pill-locked-flash 1.8s ease-in-out infinite;
 }
 

@@ -827,6 +827,15 @@ function init() {
   initWaveform();
   startIdleShimmer();
 
+  // Kevin (2026-09-11): "red pill only on tablet, ipad and mobile - not
+  // other machines" - the red/flashing-red recording pill is feedback for
+  // the tap gesture, so it only makes sense where tapping exists. Drives
+  // styles.css's .app.touch-device.state-recording /
+  // .app.touch-device.recording-locked rules; every other machine's
+  // recording pill stays the original neutral capsule with the aurora
+  // waveform, untouched.
+  if (dom.app && IS_TOUCH_DEVICE) dom.app.classList.add('touch-device');
+
   if (window.electronAPI && window.electronAPI.onBackendEvent) {
     window.electronAPI.onBackendEvent(handleBackendEvent);
   }
