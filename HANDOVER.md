@@ -37,8 +37,30 @@ autonomously per his "continue without me" instruction. Resize-fix (`630f9f2`) r
   with the resize-fix included from day one - no separate old-build-then-patch step was needed.**
 - ✅ **Desktop** - built fresh from `main` @ `e78badc` (includes the resize fix), installed, bundled vocab
   + resize-fix verified, CUDA path confirmed active, PTT running.
-- ⏳ **Tablet** - pushing the Laptop's already-built `630f9f2` installer across (large transfer, still in
-  flight) - same trick as the vocab rollout, no rebuild needed, identical Windows x64 artifact.
+- ✅ **Tablet** - DONE, but hit two real gotchas worth remembering:
+  1. **A silent `/S` install no-op.** The first `/S` install "succeeded" (exit 0) but genuinely did
+     nothing - the NSIS installer sees the same version number (`0.1.3.0`) already present and skips
+     the copy. **Fix: `Uninstall PTT.exe /S` first, THEN install** whenever reinstalling the same
+     version with different content (this will keep happening until the version number bumps per
+     build). Caught by re-checking the actual installed `ui/app.js` content (`Select-String -Pattern
+     resizeWindow`) after install - the `PTT.exe modified` timestamp alone looked plausible-ish but
+     was in fact stale, and the vocabulary.json/backend-smoke checks passed too because those files
+     genuinely hadn't changed since yesterday's vocab build - only the resize-fix lines actually prove
+     which build is live. **Never trust an install as done from exit-code + file-existence alone when
+     re-shipping the same version number - grep the actual changed source lines in the installed
+     copy.**
+  2. **Own mistake, not a tool gotcha:** after a disk-space cleanup deleted a scratch `xfer2/` dir, a
+     retry accidentally reused a *different, stale* local `xfer/` copy (the vocab-only build from
+     yesterday) that happened to satisfy an earlier "does a file exist at this path" check without its
+     content being re-verified. Re-pulled the correct `630f9f2` installer fresh from the Laptop and
+     confirmed its byte size before pushing it on. Lesson: when juggling multiple pulled installers in
+     scratch dirs, verify size/hash right after a fresh pull, not just presence.
+  Final state confirmed: installed `ui/app.js` has `await window.electronAPI.resizeWindow(...)` on both
+  calls, bundled `vocabulary.json` present, PTT running.
+
+**All five machines now confirmed on `main` @ `630f9f2`+ (resize fix + vocab + pill redesign): Mac,
+Desktop, Laptop, Tablet, Oxford-lan.** Only remaining open items: Kevin's Mac Accessibility re-grant
+toggle, and his live confirmation across machines.
 
 **Lesson for any future SSH-agent lockout:** the 1Password SSH agent refusing to sign for every
 alias at once (not just one host) means Kevin's Mac/vault is locked, not a per-machine problem - don't
