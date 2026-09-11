@@ -28,11 +28,9 @@
   --pill-purple-ink: #0e0a24;
   --pill-green: #6ce2b6;
   --pill-green-ink: #08241b;
-  /* Kevin (2026-09-11): recording itself now turns the pill red too (was
-     neutral) - solid while a single tap/hold is recording, slow-flashing
-     between these two reds while a double-tap has it locked on. */
+  /* Kevin (2026-09-11): recording turns the pill red on touch devices
+     only (see .app.touch-device.state-recording below) - solid, no flash. */
   --pill-red: #f87171;
-  --pill-red-dim: #b23a3a;
   --pill-red-ink: #2a0b0b;
   --gradient-wave: linear-gradient(180deg, #5eead4, #a78bfa, #f472b6);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.24), transparent 19rem);
@@ -65,7 +63,6 @@
   --pill-green: #0d9668;
   --pill-green-ink: #eafff6;
   --pill-red: #dc2626;
-  --pill-red-dim: #7f1d1d;
   --pill-red-ink: #fff0f0;
   --gradient-wave: linear-gradient(180deg, #0e7490, #0d9668);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.08), transparent 19rem);
@@ -330,14 +327,14 @@ body.pill-mode .app {
 
 /* Kevin reported the Tablet's pill "stuck on red, not responsive"
    (2026-09-11) - the likely real cause: a native drag region's handling
-   of a genuine touch tap is unproven (the "a stationary click still
-   fires" assumption in app.js's own comment was only ever verified with
-   a mouse), so a tap may simply never have reached handlePillTap() at
-   all on real touch hardware, leaving it stuck however it last was.
-   Fix: the pill is not a drag region on touch devices at all, so a tap
-   is guaranteed to register - mouse-drag on every other machine is
-   completely unaffected. Kevin: "just tap on the pill should be enough" -
-   accepting that the pill can't be dragged by touch is the trade-off. */
+   of a genuine touch tap was never actually proven, only assumed, so a
+   tap may simply never have reached the click handler that generation of
+   the code used, leaving it stuck however it last was. Fix: the pill is
+   not a drag region on touch devices at all - app.js drives both
+   dragging and press-to-record itself from real pointer coordinates
+   instead (see its own comment on handlePillPointerDown/Move/Up), so
+   neither gesture depends on how a drag region happens to treat touch
+   input. Mouse-drag on every other machine is completely unaffected. */
 .app.touch-device .pill-bar {
   -webkit-app-region: no-drag;
 }
@@ -360,29 +357,19 @@ body.pill-mode .app {
 }
 
 /* Kevin (2026-09-11): "red pill only on tablet, ipad and mobile - not
-   other machines" - the red/flashing-red recording pill is feedback for
-   the tap gesture (see app.js's IS_TOUCH_DEVICE / .touch-device class),
-   so it only shows on touch devices. Every other machine's recording pill
+   other machines" - the red recording pill is feedback for the press
+   gesture (see app.js's IS_TOUCH_DEVICE / .touch-device class), so it
+   only shows on touch devices. Every other machine's recording pill
    stays the original neutral capsule with the aurora waveform (Kevin,
    2026-09-09: "do not change current recording, active moving aurora
-   colours") - untouched by any of this. Double-tap-locked recording
-   slow-flashes between the two reds instead of sitting solid, so a
-   deliberately-pinned recording reads differently from a normal
-   single-tap one at a glance. */
+   colours") - untouched by any of this. Solid, not flashing: the final
+   touch gesture spec ("press for lock and press again for unlock") means
+   every touch recording is inherently the pinned-on kind - there's no
+   separate timed/unlocked variant left to visually distinguish it from,
+   so the earlier flash-when-locked treatment was dropped. */
 .app.touch-device.state-recording .pill-bar {
   background-color: var(--pill-red);
   color: var(--pill-red-ink);
-}
-@keyframes pill-locked-flash {
-  0%, 100% { background-color: var(--pill-red); }
-  50% { background-color: var(--pill-red-dim); }
-}
-/* Requires .state-recording too, not .recording-locked alone: a fast
-   double-tap can set the locked flag in app.js before the backend has
-   actually confirmed 'recording' (real mic-open latency) - without this,
-   the pill would start flashing red prematurely, while still idle. */
-.app.touch-device.recording-locked.state-recording .pill-bar {
-  animation: pill-locked-flash 1.8s ease-in-out infinite;
 }
 
 /* Kevin (2026-09-11): tap-to-record for touch (the Tablet has no physical

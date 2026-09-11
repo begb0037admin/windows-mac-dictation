@@ -405,6 +405,34 @@ ipcMain.on('close-window', (event) => {
   if (win) win.close();
 });
 
+// Kevin (2026-09-11): the pill is a native -webkit-app-region: drag region
+// on every mouse-based machine (untouched, zero code here) - but on touch
+// devices it's no-drag (styles.css .touch-device .pill-bar), and ui/app.js
+// drives repositioning itself from real pointer coordinates instead
+// ("hold and move = drag, press without moving = toggle recording" - a
+// genuine touch tap's interaction with a native drag region was the
+// unverified assumption behind the Tablet's "stuck on red" report).
+// get-window-bounds + move-window-to are that pair: read the window's
+// current rect once when the gesture starts, then reposition it by an
+// absolute target computed from the pointer's start position each move -
+// deliberately NOT accumulating per-move deltas, since a lost/coalesced
+// pointermove event under that scheme silently drifts the window off the
+// finger. This repo tried an incremental custom-drag IPC chain once
+// before (removed - see the 2026-08-10 HANDOVER entry) after it caused
+// real bugs; anchoring every move to the same fixed start point avoids
+// the failure class that caused that removal.
+ipcMain.handle('get-window-bounds', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return win ? win.getBounds() : null;
+});
+
+ipcMain.on('move-window-to', (event, x, y) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  const { width, height } = win.getBounds();
+  win.setBounds({ x: Math.round(x), y: Math.round(y), width, height });
+});
+
 ipcMain.on('open-accessibility-settings', () => {
   if (macPermissionGate) {
     macPermissionGate.openAccessibilitySettings().catch((error) => {

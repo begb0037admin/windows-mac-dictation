@@ -2,15 +2,19 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// The renderer uses Electron's native draggable regions for window movement;
-// only deliberate mode changes cross this bridge. sendCommand/onBackendEvent
-// are the JSON-lines pipe to the Python backend (see main.py's module
-// docstring / electron/main.js).
+// The renderer uses Electron's native draggable regions for window movement
+// on mouse-based machines; only deliberate mode changes cross this bridge
+// there. On touch devices the pill drives its own repositioning instead -
+// getWindowBounds/moveWindowTo - see electron/main.js's own comment on
+// those handlers. sendCommand/onBackendEvent are the JSON-lines pipe to
+// the Python backend (see main.py's module docstring / electron/main.js).
 contextBridge.exposeInMainWorld('electronAPI', {
   // invoke, not send: the renderer must know the native resize has actually
   // happened before it flips CSS classes that size themselves off 100vh
   // (mode-pill/pill-mode) - see electron/main.js's resize-window handler.
   resizeWindow: (width, height) => ipcRenderer.invoke('resize-window', width, height),
+  getWindowBounds: () => ipcRenderer.invoke('get-window-bounds'),
+  moveWindowTo: (x, y) => ipcRenderer.send('move-window-to', x, y),
   closeWindow: () => ipcRenderer.send('close-window'),
   openMacAccessibilitySettings: () => ipcRenderer.send('open-accessibility-settings'),
   sendCommand: (cmd) => ipcRenderer.send('backend-command', cmd),

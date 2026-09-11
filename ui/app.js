@@ -425,7 +425,6 @@ function updateStatus(state, text) {
   if (state === 'idle') {
     resetWaveform();
     startIdleShimmer();
-    setPillTapLocked(false);
   } else {
     stopIdleShimmer();
   }
@@ -525,34 +524,52 @@ function dismissAppError() {
   dom.appError.classList.remove('visible');
 }
 
-// ── Touch trigger (pill tap-to-record) ──
+// ── Touch trigger (pill press-to-record / hold-to-drag) ──
 
-// Kevin (2026-09-11): the tablet has no physical hotkey to hold, so tapping
-// the pill itself (no separate button/icon - "just tap on the pill should
-// be enough") drives the same start_recording()/stop_recording() the
-// physical hotkey does, via new start_recording/stop_recording backend
-// commands (main.py's handle_command()). This is an additional trigger
-// source alongside the keyboard/mouse hotkey, not a replacement.
+// Kevin (2026-09-11): the tablet has no physical hotkey to hold, so the
+// pill itself (no separate button/icon - "just tap on the pill should be
+// enough") drives the same start_recording()/stop_recording() the
+// physical hotkey does, via the start_recording/stop_recording backend
+// commands (main.py's handle_command()). Additional trigger source
+// alongside the keyboard/mouse hotkey, not a replacement.
 //
 // "only the tablet is touch screen - i do not want the tap global": gated
 // on the device's own primary pointer type, not a hostname/platform check,
 // so it stays correctly off on every mouse-only machine (Mac/Desktop/
-// Laptop) and on automatically for any touch-primary device, this tablet
-// included, with no per-machine config needed.
+// Laptop) and on automatically for any touch-primary device with no
+// per-machine config needed.
 const IS_TOUCH_DEVICE = Boolean(
   window.matchMedia && window.matchMedia('(pointer: coarse)').matches
 );
-//
-// The pill is still -webkit-app-region: drag (so it can be repositioned -
-// "we must separate dragging from tapping... dragging is moving, tapping
-// is not"). A native drag region does not reliably dispatch a `click`
-// once the OS has recognised an actual drag, but a genuine stationary tap
-// (no real pointer movement) still does - so a plain 'click' listener on
-// the pill is the tap handler, and no custom pointer-move-threshold
-// dragging code was written. If real hardware testing ever shows taps
-// getting swallowed here, that's the first thing to revisit.
-const DOUBLE_TAP_MS = 300;
-let lastPillTapAt = 0;
+
+// Final gesture spec (Kevin, 2026-09-11, after the Tablet got stuck on red
+// from an earlier click-based attempt): "hold for drag and press for lock
+// and press again for unlock" - two gestures only, told apart by real
+// finger movement, not timing guesswork or native drag-region behaviour
+// (whether a genuine touch tap reliably reaches a `click` listener on a
+// -webkit-app-region: drag element was the unverified assumption behind
+// the stuck report). styles.css makes the pill -webkit-app-region: no-drag
+// on touch devices - dragging is fully custom here instead:
+//   - pointerdown: remember where the finger went down and the window's
+//     current bounds (electron/main.js's get-window-bounds).
+//   - pointermove: once the finger has moved past a small threshold,
+//     it's a drag - reposition the window to an ABSOLUTE target computed
+//     from the fixed start point each time (move-window-to), never by
+//     accumulating this move's own delta onto the last position. A lost
+//     or coalesced pointermove under an accumulating scheme silently
+//     drifts the window off the finger; anchoring to the same start point
+//     every time cannot drift. This repo tried an incremental custom-drag
+//     IPC chain once before and removed it after real bugs - see
+//     electron/main.js's own comment on get-window-bounds/move-window-to.
+//   - pointerup: if the finger never crossed the movement threshold, it
+//     was a stationary press, not a drag - toggle recording (press #1
+//     starts it, press #2 stops it; every touch recording is "locked on"
+//     by definition now, there's no separate un-locked/timed variant).
+const PILL_DRAG_THRESHOLD_PX = 8;
+let pillPointerId = null;
+let pillPointerStartScreen = null;
+let pillWindowStartBounds = null;
+let pillIsDragging = false;
 
 function sendRecordingCommand(cmd) {
   if (window.electronAPI) {
@@ -560,41 +577,59 @@ function sendRecordingCommand(cmd) {
   }
 }
 
-function setPillTapLocked(locked) {
-  // Drives the pill capsule's slow-flash (styles.css .recording-locked) -
-  // Kevin (2026-09-11): no separate tap icon/badge - the pill's own colour
-  // (solid red vs slow-flashing red) is the only signal, both for "is it
-  // recording" and "is it locked on".
-  if (dom.app) dom.app.classList.toggle('recording-locked', locked);
-}
-
-// Tap while idle starts recording; tap while recording stops it (same
-// pipeline as releasing the hotkey). Double-tap while idle also starts
-// recording, but shows a lock badge so it's visually obvious it's pinned
-// on rather than accidentally left running - since the second tap of a
-// double-tap can land before or after the backend's own 'recording'
-// status confirmation comes back, treat a same-pair second tap as "lock
-// it" even if currentState has already flipped to 'recording' by then,
-// rather than racily stopping the very recording the pair just started.
-function handlePillTap() {
-  const now = Date.now();
-  const isSecondTapOfPair = now - lastPillTapAt < DOUBLE_TAP_MS;
-  lastPillTapAt = now;
-
+function handlePillPress() {
   if (currentState === 'recording') {
-    if (isSecondTapOfPair) {
-      setPillTapLocked(true);
-    } else {
-      sendRecordingCommand('stop_recording');
-      setPillTapLocked(false);
-    }
+    sendRecordingCommand('stop_recording');
     return;
   }
-
   if (currentState !== 'idle') return; // nothing useful to start/stop mid-pipeline
-
   sendRecordingCommand('start_recording');
-  setPillTapLocked(isSecondTapOfPair);
+}
+
+async function handlePillPointerDown(event) {
+  if (pillPointerId !== null) return; // a gesture is already in progress
+  pillPointerId = event.pointerId;
+  pillPointerStartScreen = { x: event.screenX, y: event.screenY };
+  pillIsDragging = false;
+  pillWindowStartBounds = window.electronAPI
+    ? await window.electronAPI.getWindowBounds()
+    : null;
+  if (dom.pillBar && dom.pillBar.setPointerCapture) {
+    try {
+      dom.pillBar.setPointerCapture(event.pointerId);
+    } catch (e) {
+      // Capture failing is not fatal - the gesture still works via the
+      // listeners already attached directly to the element.
+    }
+  }
+}
+
+function handlePillPointerMove(event) {
+  if (event.pointerId !== pillPointerId || !pillPointerStartScreen) return;
+  const dx = event.screenX - pillPointerStartScreen.x;
+  const dy = event.screenY - pillPointerStartScreen.y;
+
+  if (!pillIsDragging) {
+    if (Math.hypot(dx, dy) < PILL_DRAG_THRESHOLD_PX) return; // still within tap tolerance
+    pillIsDragging = true;
+  }
+
+  if (pillWindowStartBounds && window.electronAPI) {
+    window.electronAPI.moveWindowTo(
+      pillWindowStartBounds.x + dx,
+      pillWindowStartBounds.y + dy
+    );
+  }
+}
+
+function handlePillPointerUp(event) {
+  if (event.pointerId !== pillPointerId) return;
+  const wasDragging = pillIsDragging;
+  pillPointerId = null;
+  pillPointerStartScreen = null;
+  pillWindowStartBounds = null;
+  pillIsDragging = false;
+  if (!wasDragging) handlePillPress();
 }
 
 // ── Pill / Mini Bar Mode ──
@@ -828,12 +863,11 @@ function init() {
   startIdleShimmer();
 
   // Kevin (2026-09-11): "red pill only on tablet, ipad and mobile - not
-  // other machines" - the red/flashing-red recording pill is feedback for
-  // the tap gesture, so it only makes sense where tapping exists. Drives
-  // styles.css's .app.touch-device.state-recording /
-  // .app.touch-device.recording-locked rules; every other machine's
-  // recording pill stays the original neutral capsule with the aurora
-  // waveform, untouched.
+  // other machines" - the red recording pill is feedback for the press
+  // gesture, so it only makes sense where pressing exists. Drives
+  // styles.css's .app.touch-device.state-recording rule; every other
+  // machine's recording pill stays the original neutral capsule with the
+  // aurora waveform, untouched.
   if (dom.app && IS_TOUCH_DEVICE) dom.app.classList.add('touch-device');
 
   if (window.electronAPI && window.electronAPI.onBackendEvent) {
@@ -882,7 +916,12 @@ function init() {
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
   if (dom.btnPillExpand) dom.btnPillExpand.addEventListener('click', disablePillMode);
-  if (dom.pillBar && IS_TOUCH_DEVICE) dom.pillBar.addEventListener('click', handlePillTap);
+  if (dom.pillBar && IS_TOUCH_DEVICE) {
+    dom.pillBar.addEventListener('pointerdown', handlePillPointerDown);
+    dom.pillBar.addEventListener('pointermove', handlePillPointerMove);
+    dom.pillBar.addEventListener('pointerup', handlePillPointerUp);
+    dom.pillBar.addEventListener('pointercancel', handlePillPointerUp);
+  }
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
     if (window.electronAPI) {
       window.electronAPI.closeWindow();
