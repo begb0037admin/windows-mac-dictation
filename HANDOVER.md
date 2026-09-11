@@ -59,8 +59,22 @@ autonomously per his "continue without me" instruction. Resize-fix (`630f9f2`) r
   calls, bundled `vocabulary.json` present, PTT running.
 
 **All five machines now confirmed on `main` @ `630f9f2`+ (resize fix + vocab + pill redesign): Mac,
-Desktop, Laptop, Tablet, Oxford-lan.** Only remaining open items: Kevin's Mac Accessibility re-grant
-toggle, and his live confirmation across machines.
+Desktop, Laptop, Tablet, Oxford-lan.**
+
+**Real gap found 2026-09-11: every Mac rebuild this session only ran `tccutil reset Accessibility`,
+never `tccutil reset Microphone`.** Kevin reported "PTT is not working" - `backend.log` showed
+`STREAM_CONSTRUCTION_FAILED` / `PortAudioError` on every recording attempt, i.e. the mic stream
+wouldn't open. Ad-hoc signing invalidates **every** TCC grant tied to the bundle identity on a new
+signature, not just Accessibility - Microphone (and, less obviously, Input Monitoring) need the same
+treatment every single rebuild. Fixed live: `tccutil reset Microphone com.lelitte.ptt`, relaunched,
+opened System Settings > Privacy & Security > Microphone for Kevin. **Going forward, every Mac
+rebuild's post-install step must run `tccutil reset Accessibility com.lelitte.ptt` AND
+`tccutil reset Microphone com.lelitte.ptt` together, not Accessibility alone** - update any local
+build-install script/checklist to do both. Kevin needs to re-grant both (Accessibility toggle off/on,
+Microphone checkbox) and relaunch once more.
+
+Only remaining open items: Kevin's Mac Accessibility + Microphone re-grants, and his live confirmation
+across all five machines.
 
 **Lesson for any future SSH-agent lockout:** the 1Password SSH agent refusing to sign for every
 alias at once (not just one host) means Kevin's Mac/vault is locked, not a per-machine problem - don't

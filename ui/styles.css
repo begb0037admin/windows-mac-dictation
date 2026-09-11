@@ -542,7 +542,11 @@ body.pill-mode .app {
 }
 
 .app.state-error #statusText {
-  color: var(--accent-red);
+  /* Kevin (2026-09-11): red-on-dark error text was unreadable. The status
+     light dot (still red) is the colour cue; the message itself uses the
+     normal full-contrast ink colour so it can actually be read. */
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .app.state-stopping #statusText,
@@ -947,8 +951,10 @@ body.pill-mode .flash {
 }
 
 .app-error-code {
+  /* Kevin (2026-09-11): same readability fix as #statusText - no red text,
+     bold + uppercase carries the emphasis instead. */
   font-weight: 800;
-  color: var(--accent-red);
+  color: var(--ink);
   font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
