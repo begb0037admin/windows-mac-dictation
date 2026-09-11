@@ -534,6 +534,15 @@ function dismissAppError() {
 // commands (main.py's handle_command()). This is an additional trigger
 // source alongside the keyboard/mouse hotkey, not a replacement.
 //
+// "only the tablet is touch screen - i do not want the tap global": gated
+// on the device's own primary pointer type, not a hostname/platform check,
+// so it stays correctly off on every mouse-only machine (Mac/Desktop/
+// Laptop) and on automatically for any touch-primary device, this tablet
+// included, with no per-machine config needed.
+const IS_TOUCH_DEVICE = Boolean(
+  window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+);
+//
 // The pill is still -webkit-app-region: drag (so it can be repositioned -
 // "we must separate dragging from tapping... dragging is moving, tapping
 // is not"). A native drag region does not reliably dispatch a `click`
@@ -864,7 +873,7 @@ function init() {
 
   if (dom.btnPill) dom.btnPill.addEventListener('click', enablePillMode);
   if (dom.btnPillExpand) dom.btnPillExpand.addEventListener('click', disablePillMode);
-  if (dom.pillBar) dom.pillBar.addEventListener('click', handlePillTap);
+  if (dom.pillBar && IS_TOUCH_DEVICE) dom.pillBar.addEventListener('click', handlePillTap);
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
     if (window.electronAPI) {
       window.electronAPI.closeWindow();
