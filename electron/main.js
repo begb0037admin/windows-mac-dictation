@@ -660,6 +660,13 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('app-version', resolveBuildInfo());
     if (macPermissionGate) macPermissionGate.ensureBackendStarted();
+    // Chromium's default pinch/double-tap page zoom is never disabled by
+    // touch-action CSS (that only governs gesture routing, not page zoom).
+    // On the Tablet's touchscreen a hold-and-drag on the tiny pill could be
+    // read as a zoom gesture, visually scaling the whole page up - reads
+    // exactly as "the pill grows" without any real window resize. Locking
+    // the zoom level removes that path entirely.
+    win.webContents.setVisualZoomLevelLimits(1, 1);
   });
   win.loadFile(indexPath);
 
