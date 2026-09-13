@@ -570,6 +570,7 @@ let pillPointerId = null;
 let pillPointerStartScreen = null;
 let pillWindowStartBounds = null;
 let pillIsDragging = false;
+let pillGestureHadAdditionalPointer = false;
 
 function sendRecordingCommand(cmd) {
   if (window.electronAPI) {
@@ -587,20 +588,47 @@ function handlePillPress() {
 }
 
 async function handlePillPointerDown(event) {
-  if (pillPointerId !== null) return; // a gesture is already in progress
+  if (pillPointerId !== null) {
+    // A second touch/pointer must never become a second drag or turn a
+    // multi-touch contact into a stationary press when the primary pointer
+    // is released. The primary gesture remains owned by pillPointerId.
+    pillGestureHadAdditionalPointer = true;
+    return;
+  }
   pillPointerId = event.pointerId;
   pillPointerStartScreen = { x: event.screenX, y: event.screenY };
   pillIsDragging = false;
-  pillWindowStartBounds = window.electronAPI
-    ? await window.electronAPI.getWindowBounds()
-    : null;
+  pillGestureHadAdditionalPointer = false;
+
+  // Capture synchronously while the pointerdown dispatch is still active.
+  // Waiting for the bounds IPC first leaves a small but real window in which
+  // a fast touch can leave the element before capture is established.
   if (dom.pillBar && dom.pillBar.setPointerCapture) {
     try {
       dom.pillBar.setPointerCapture(event.pointerId);
     } catch (e) {
-      // Capture failing is not fatal - the gesture still works via the
-      // listeners already attached directly to the element.
+      // The document-level move/up/cancel listeners below are a fallback for
+      // capture failure while the pointer remains inside the renderer.
     }
+  }
+
+  try {
+    const bounds = window.electronAPI
+      ? await window.electronAPI.getWindowBounds()
+      : null;
+    // The pointer may have ended/cancelled while the IPC request was in
+    // flight. Do not resurrect state for a completed gesture.
+    if (pillPointerId !== event.pointerId) return;
+    pillWindowStartBounds = bounds
+      && Number.isFinite(bounds.x)
+      && Number.isFinite(bounds.y)
+      ? bounds
+      : null;
+  } catch (e) {
+    // A bounds read failure must not create an unhandled rejection or break
+    // stationary press-to-record. Dragging simply has no native target until
+    // a later gesture can read a valid origin.
+    pillWindowStartBounds = null;
   }
 }
 
@@ -622,14 +650,40 @@ function handlePillPointerMove(event) {
   }
 }
 
-function handlePillPointerUp(event) {
-  if (event.pointerId !== pillPointerId) return;
-  const wasDragging = pillIsDragging;
+function resetPillPointer(event) {
+  if (event.pointerId !== pillPointerId) return null;
+  const result = {
+    wasDragging: pillIsDragging,
+    hadAdditionalPointer: pillGestureHadAdditionalPointer,
+  };
+  if (dom.pillBar && dom.pillBar.releasePointerCapture) {
+    try {
+      if (!dom.pillBar.hasPointerCapture || dom.pillBar.hasPointerCapture(event.pointerId)) {
+        dom.pillBar.releasePointerCapture(event.pointerId);
+      }
+    } catch (e) {
+      // Pointer capture is released automatically after pointerup/cancel.
+    }
+  }
   pillPointerId = null;
   pillPointerStartScreen = null;
   pillWindowStartBounds = null;
   pillIsDragging = false;
-  if (!wasDragging) handlePillPress();
+  pillGestureHadAdditionalPointer = false;
+  return result;
+}
+
+function handlePillPointerUp(event) {
+  const result = resetPillPointer(event);
+  if (!result) return;
+  if (!result.wasDragging && !result.hadAdditionalPointer) handlePillPress();
+}
+
+function handlePillPointerCancel(event) {
+  // Cancellation is an interrupted gesture, not a stationary press. In
+  // particular, Windows may cancel the primary touch when a second contact
+  // or palm contact is detected; never turn that into a recording toggle.
+  resetPillPointer(event);
 }
 
 // ── Pill / Mini Bar Mode ──
@@ -862,12 +916,9 @@ function init() {
   initWaveform();
   startIdleShimmer();
 
-  // Kevin (2026-09-11): "red pill only on tablet, ipad and mobile - not
-  // other machines" - the red recording pill is feedback for the press
-  // gesture, so it only makes sense where pressing exists. Drives
-  // styles.css's .app.touch-device.state-recording rule; every other
-  // machine's recording pill stays the original neutral capsule with the
-  // aurora waveform, untouched.
+  // Touch-primary devices need the .touch-device class for their no-drag
+  // pill surface and hidden expand control. Recording visuals remain shared
+  // across touch and mouse machines.
   if (dom.app && IS_TOUCH_DEVICE) dom.app.classList.add('touch-device');
 
   if (window.electronAPI && window.electronAPI.onBackendEvent) {
@@ -918,9 +969,13 @@ function init() {
   if (dom.btnPillExpand) dom.btnPillExpand.addEventListener('click', disablePillMode);
   if (dom.pillBar && IS_TOUCH_DEVICE) {
     dom.pillBar.addEventListener('pointerdown', handlePillPointerDown);
-    dom.pillBar.addEventListener('pointermove', handlePillPointerMove);
-    dom.pillBar.addEventListener('pointerup', handlePillPointerUp);
-    dom.pillBar.addEventListener('pointercancel', handlePillPointerUp);
+    // Keep move/up/cancel observation at document level as a fallback for a
+    // platform that fails pointer capture after the finger leaves the pill.
+    // The handlers filter by the active pointer id, so unrelated pointers
+    // remain inert and events are not double-processed on the pill.
+    document.addEventListener('pointermove', handlePillPointerMove);
+    document.addEventListener('pointerup', handlePillPointerUp);
+    document.addEventListener('pointercancel', handlePillPointerCancel);
   }
   if (dom.btnClose) dom.btnClose.addEventListener('click', async () => {
     if (window.electronAPI) {

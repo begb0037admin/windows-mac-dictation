@@ -63,6 +63,22 @@ function appendLog(prefix, text) {
   }
 }
 
+function lockVisualZoom(webContents) {
+  try {
+    const result = webContents.setVisualZoomLevelLimits(1, 1);
+    // Electron 43 exposes this as a Promise on WebContents. Do not leave a
+    // renderer-startup rejection unhandled if the API is unavailable or
+    // fails on a particular platform/runtime.
+    if (result && typeof result.catch === 'function') {
+      result.catch((error) => {
+        appendLog('main', `visual zoom limit setup failed: ${error && error.constructor ? error.constructor.name : 'Error'}`);
+      });
+    }
+  } catch (error) {
+    appendLog('main', `visual zoom limit setup failed: ${error && error.constructor ? error.constructor.name : 'Error'}`);
+  }
+}
+
 // ---------- build info (Kevin, 2026-07-31: too many installers built by
 // hand to keep track of which one is actually running - the app should be
 // able to say for itself) ----------
@@ -110,6 +126,12 @@ function resolveBackendCommand() {
 // ---------- fatal lifecycle (SS12/13) ----------
 
 let mainWindow = null;
+// This window is non-resizable and has exactly two deliberate sizes. Keep
+// the last size requested by the mode-switch IPC as the authoritative drag
+// size. Reading width/height from getBounds() on every move and writing those
+// values back can compound Windows DPI rounding drift into visible growth,
+// even though the renderer only asked to move the window.
+let currentWindowSize = { width: 400, height: 360 };
 let tray = null;
 let trayWindow = null;
 let macPermissionGate = null;
@@ -373,6 +395,7 @@ ipcMain.handle('resize-window', (event, width, height) => {
   if (!win) return;
   const targetWidth = Math.round(width);
   const targetHeight = Math.round(height);
+  currentWindowSize = { width: targetWidth, height: targetHeight };
   // Mode switches are the only legitimate size changes. Dragging is
   // Electron's native app-region operation and never reaches this handler.
   win.setSize(targetWidth, targetHeight);
@@ -413,14 +436,13 @@ ipcMain.on('close-window', (event) => {
 // genuine touch tap's interaction with a native drag region was the
 // unverified assumption behind the Tablet's "stuck on red" report).
 // get-window-bounds + move-window-to are that pair: read the window's
-// current rect once when the gesture starts, then reposition it by an
+// current x/y rect once when the gesture starts, then reposition it by an
 // absolute target computed from the pointer's start position each move -
 // deliberately NOT accumulating per-move deltas, since a lost/coalesced
-// pointermove event under that scheme silently drifts the window off the
-// finger. This repo tried an incremental custom-drag IPC chain once
-// before (removed - see the 2026-08-10 HANDOVER entry) after it caused
-// real bugs; anchoring every move to the same fixed start point avoids
-// the failure class that caused that removal.
+// pointermove under that scheme silently drifts the window off the finger.
+// Width/height are never sourced from getBounds() here: on Windows, feeding
+// those values back on every move can compound DPI rounding into window
+// growth. currentWindowSize is updated only by the deliberate mode switch.
 ipcMain.handle('get-window-bounds', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return win ? win.getBounds() : null;
@@ -429,8 +451,12 @@ ipcMain.handle('get-window-bounds', (event) => {
 ipcMain.on('move-window-to', (event, x, y) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
-  const { width, height } = win.getBounds();
-  win.setBounds({ x: Math.round(x), y: Math.round(y), width, height });
+  win.setBounds({
+    x: Math.round(x),
+    y: Math.round(y),
+    width: currentWindowSize.width,
+    height: currentWindowSize.height,
+  });
 });
 
 ipcMain.on('open-accessibility-settings', () => {
@@ -578,6 +604,11 @@ function createWindow() {
   });
   mainWindow = win;
 
+  // Lock visual zoom before the first navigation is loaded. This closes the
+  // timing gap between BrowserWindow construction and did-finish-load; the
+  // latter re-applies the same limit after any later renderer navigation.
+  lockVisualZoom(win.webContents);
+
   // Wired before any fatalNative()-capable code below (UI_MISSING,
   // TRAY_ICON_EMPTY, etc.) so backendSupervisor's hooks - in particular
   // setQuitting/quitApp, which the single shutdown coordinator
@@ -660,13 +691,10 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('app-version', resolveBuildInfo());
     if (macPermissionGate) macPermissionGate.ensureBackendStarted();
-    // Chromium's default pinch/double-tap page zoom is never disabled by
-    // touch-action CSS (that only governs gesture routing, not page zoom).
-    // On the Tablet's touchscreen a hold-and-drag on the tiny pill could be
-    // read as a zoom gesture, visually scaling the whole page up - reads
-    // exactly as "the pill grows" without any real window resize. Locking
-    // the zoom level removes that path entirely.
-    win.webContents.setVisualZoomLevelLimits(1, 1);
+    // Re-apply after a completed navigation as defense in depth; resizing
+    // between pill/full mode does not recreate this WebContents, so the
+    // limit remains in force across both modes.
+    lockVisualZoom(win.webContents);
   });
   win.loadFile(indexPath);
 

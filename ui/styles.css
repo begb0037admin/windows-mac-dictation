@@ -28,10 +28,6 @@
   --pill-purple-ink: #0e0a24;
   --pill-green: #6ce2b6;
   --pill-green-ink: #08241b;
-  /* Kevin (2026-09-11): recording turns the pill red on touch devices
-     only (see .app.touch-device.state-recording below) - solid, no flash. */
-  --pill-red: #f87171;
-  --pill-red-ink: #2a0b0b;
   --gradient-wave: linear-gradient(180deg, #5eead4, #a78bfa, #f472b6);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.24), transparent 19rem);
   --shadow-brand: 0 8px 20px rgba(17, 24, 39, 0.3);
@@ -62,8 +58,6 @@
   --pill-purple-ink: #f3efff;
   --pill-green: #0d9668;
   --pill-green-ink: #eafff6;
-  --pill-red: #dc2626;
-  --pill-red-ink: #fff0f0;
   --gradient-wave: linear-gradient(180deg, #0e7490, #0d9668);
   --gradient-bg: radial-gradient(circle at 80% 20%, rgba(47, 99, 216, 0.08), transparent 19rem);
   --shadow-brand: 0 8px 20px rgba(0, 0, 0, 0.1);
@@ -73,10 +67,15 @@
 
 html {
   background: transparent;
+  /* Keep page-level touch gestures from enabling pinch/double-tap zoom.
+     The pill has its own stricter `touch-action: none` rule below. */
+  touch-action: pan-x pan-y;
 }
 
 body {
   background: transparent;
+  /* Defense in depth for any touch that starts outside the pill. */
+  touch-action: pan-x pan-y;
   color: var(--ink);
   line-height: 1.5;
   overflow: hidden;
@@ -344,12 +343,11 @@ body.pill-mode .app {
   -webkit-app-region: no-drag;
 }
 
-/* Pill state fills. idle + recording keep the neutral capsule (with the
-   live waveform) on every machine except touch devices (see below) - the
-   processing states go purple; paste goes green - all in the same
-   fixed-size capsule. Waveform bar colours are unchanged either way
-   (painted separately in app.js) - only the capsule background/ink
-   changes. */
+/* Pill state fills. Idle + recording keep the neutral capsule with the live
+   waveform on every machine. Processing states go purple; paste goes green -
+   all in the same fixed-size capsule. Waveform bar colours are unchanged
+   either way (painted separately in app.js) - only the capsule background/
+   ink changes for the non-recording status states. */
 .app.state-preparing-model .pill-bar,
 .app.state-transcribing .pill-bar,
 .app.state-cleanup .pill-bar {
@@ -361,22 +359,6 @@ body.pill-mode .app {
   color: var(--pill-green-ink);
 }
 
-/* Kevin (2026-09-11): "red pill only on tablet, ipad and mobile - not
-   other machines" - the red recording pill is feedback for the press
-   gesture (see app.js's IS_TOUCH_DEVICE / .touch-device class), so it
-   only shows on touch devices. Every other machine's recording pill
-   stays the original neutral capsule with the aurora waveform (Kevin,
-   2026-09-09: "do not change current recording, active moving aurora
-   colours") - untouched by any of this. Solid, not flashing: the final
-   touch gesture spec ("press for lock and press again for unlock") means
-   every touch recording is inherently the pinned-on kind - there's no
-   separate timed/unlocked variant left to visually distinguish it from,
-   so the earlier flash-when-locked treatment was dropped. */
-.app.touch-device.state-recording .pill-bar {
-  background-color: var(--pill-red);
-  color: var(--pill-red-ink);
-}
-
 /* Kevin (2026-09-11): tap-to-record for touch (the Tablet has no physical
    hotkey to hold) - "not need for a button... just tap on the pill should
    be enough". No separate icon/button: ui/app.js drives both dragging and
@@ -384,24 +366,19 @@ body.pill-mode .app {
    handlePillPointerDown/Move/Up) - not a plain 'click' listener, which an
    earlier version of this used before Kevin hit the Tablet's pill getting
    stuck (see the -webkit-app-region: no-drag comment on .pill-bar).
-   Recording state is signalled purely by the capsule's own colour (solid
-   red on touch devices, see below) - no dot needed, since there's no icon
-   left to put one on. */
+   Recording state remains the shared neutral capsule + aurora waveform on
+   every machine - no extra dot or touch-only colour is needed. */
 
 /* A native drag region deliberately does not dispatch DOM clicks for a
    real drag gesture. Keep one small no-drag control for returning from the
    pill to the full view on mouse platforms - a plain yellow dot,
    hover-reveal only. Absolutely positioned (see .pill-bar comment above).
    Kevin reported the Tablet's pill "growing instead of moving" on drag
-   (2026-09-11) - root cause: touch has no real hover, but Chromium
-   simulates one on a tap, so a drag/press starting anywhere near this
-   button's hit-region (a finger is much wider than a mouse pointer, easily
-   overlapping a 24px target on a 116px-wide pill) could enable it AND fire
-   its click (-> disablePillMode() -> resize to the full 400x360 view) at
-   the same time app.js's own pointer handlers were tracking the gesture
-   as a drag - reads exactly as "grows instead of moving". Fully disabled
-   on touch devices - it was never usable there anyway (no real hover to
-   reveal it), so nothing is lost by removing it outright. */
+   (2026-09-11). Keep this control disabled on touch devices because there is
+   no real hover to reveal it and the pill's pointer-tracking path owns the
+   whole touch surface. This isolates the deliberate Full-mode resize action
+   from touch drags; it is defensive separation, not a confirmed explanation
+   of the historical growth symptom. */
 .pill-expand {
   -webkit-app-region: no-drag;
   position: absolute;
