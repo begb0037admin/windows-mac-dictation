@@ -109,6 +109,13 @@ config["whisper"] = _resolve_whisper_device(config["whisper"])
 SAMPLE_RATE = config["sample_rate"]
 HOTKEY_NAME = config["hotkey"]
 
+# Resolved once by main()'s startup microphone check. It starts as None so
+# direct unit-level calls before startup retain sounddevice's default behavior;
+# main() snapshots the successful default input index without enumeration, or
+# stores a fallback index, and start_recording() uses that same index for every
+# subsequent stream.
+resolved_input_device = None
+
 # Personal vocabulary (docs/VOCABULARY_BRIEF.md): committed baseline plus an
 # optional per-machine file, merged. Used twice - a deterministic
 # replacement pass on the raw transcript (see stop_recording()), and the
@@ -557,6 +564,79 @@ def emit_diag(code, **fields):
     print(f"P2T_DIAG {json.dumps(payload)}", file=sys.stderr)
 
 
+# Name substrings (case-insensitive) of loopback/"what you hear"-style
+# capture devices - these pass check_input_settings like a real microphone
+# but record system playback audio, not speech. A blind first-success-wins
+# fallback must not silently land on one of these (confirmed real risk, not
+# hypothetical - see memory/2026-08-14 mic-crash entries: picking the wrong
+# device "fixes" the crash while producing useless/poor-quality audio).
+_LOOPBACK_DEVICE_NAME_MARKERS = ("stereo mix", "wave out", "what u hear", "loopback")
+
+
+def _is_loopback_device_name(name):
+    lowered = (name or "").lower()
+    return any(marker in lowered for marker in _LOOPBACK_DEVICE_NAME_MARKERS)
+
+
+def _resolve_input_device():
+    """Validate and cache the input device used by every recording stream.
+
+    The OS default is intentionally tried first because it is the common path
+    and needs no device enumeration. If that check fails, try each
+    input-capable device in sounddevice's reported order and retain the first
+    one that accepts the configured format - real microphones first, then
+    (only if nothing else works) loopback-style devices as a last resort, so
+    a machine is never left with zero input rather than a poor-quality one.
+    On total failure, re-raise the original default-device exception so
+    main() preserves its existing fatal microphone message and exit behavior.
+    """
+    global resolved_input_device
+    resolved_input_device = None
+
+    try:
+        sd.check_input_settings(
+            device=None,
+            samplerate=SAMPLE_RATE,
+            channels=1,
+        )
+    except Exception as default_exc:
+        try:
+            devices = sd.query_devices()
+        except Exception:
+            raise default_exc from None
+
+        candidates = [
+            (index, device_info)
+            for index, device_info in enumerate(devices)
+            if (device_info.get("max_input_channels") or 0) >= 1
+        ]
+        # Real microphones before loopback/"what you hear" devices, since a
+        # loopback device passing this same check is a mislead, not a fix.
+        candidates.sort(key=lambda pair: _is_loopback_device_name(pair[1].get("name")))
+
+        for index, device_info in candidates:
+            try:
+                sd.check_input_settings(
+                    device=index,
+                    samplerate=SAMPLE_RATE,
+                    channels=1,
+                )
+            except Exception:
+                continue
+
+            resolved_input_device = index
+            emit_diag(
+                "MIC_FALLBACK_DEVICE_USED",
+                requested="default",
+                actual=index,
+            )
+            return
+
+        raise default_exc from None
+
+    resolved_input_device = sd.default.device[0]
+
+
 def log_stage_timing(code, started_at, char_count=None):
     """Emit content-free timings through Electron's diagnostic allowlist."""
     payload = {
@@ -712,6 +792,7 @@ def start_recording():
 
     try:
         local_stream = sd.InputStream(
+            device=resolved_input_device,
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype="float32",
@@ -1262,7 +1343,7 @@ def main():
         return
 
     try:
-        sd.check_input_settings(samplerate=SAMPLE_RATE, channels=1)
+        _resolve_input_device()
     except Exception as exc:
         print(f"[mic] no usable microphone found: {exc}", file=sys.stderr)
         if platform.system() == "Darwin":
