@@ -135,6 +135,108 @@ class MicDeviceStreamReuseTests(unittest.TestCase):
         )
         self.assertEqual(main.recording_state, main.RecordingState.RECORDING)
 
+    def test_start_recording_retries_with_a_refreshed_device_after_construction_failure(self):
+        stale_device_error = main.sd.PortAudioError("invalid device")
+        fake_stream = mock.Mock()
+
+        def refresh_device():
+            main.resolved_input_device = 9
+
+        with mock.patch.object(
+            main.sd, "InputStream", side_effect=[stale_device_error, fake_stream]
+        ) as input_stream:
+            with mock.patch.object(main, "_resolve_input_device", side_effect=refresh_device) as resolve:
+                with mock.patch.object(main, "capture_focus_target", return_value=None):
+                    with mock.patch.object(main, "emit_diag") as emit_diag:
+                        with mock.patch.object(main, "push_status") as push_status:
+                            with mock.patch.object(main, "push_transcript"):
+                                with mock.patch.object(
+                                    main, "live_partial_transcription_enabled", return_value=False
+                                ):
+                                    main.start_recording()
+
+        self.assertEqual([call.kwargs["device"] for call in input_stream.call_args_list], [4, 9])
+        resolve.assert_called_once_with()
+        emit_diag.assert_called_once_with(
+            "STREAM_CONSTRUCTION_RETRY", error_class="PortAudioError"
+        )
+        push_status.assert_called_once_with("recording", "Listening...")
+        self.assertEqual(main.recording_state, main.RecordingState.RECORDING)
+
+    def test_start_recording_does_not_retry_non_portaudio_construction_error(self):
+        construction_error = RuntimeError("programming error")
+
+        with mock.patch.object(main.sd, "InputStream", side_effect=construction_error) as input_stream:
+            with mock.patch.object(main, "_resolve_input_device") as resolve:
+                with mock.patch.object(main, "capture_focus_target", return_value=None):
+                    with mock.patch.object(main, "emit_diag") as emit_diag:
+                        with mock.patch.object(main, "push_status") as push_status:
+                            with mock.patch.object(main, "push_transcript") as push_transcript:
+                                main.start_recording()
+
+        input_stream.assert_called_once()
+        resolve.assert_not_called()
+        emit_diag.assert_called_once_with(
+            "STREAM_CONSTRUCTION_FAILED", error_class="RuntimeError"
+        )
+        push_status.assert_called_once_with(
+            "error", "Could not start recording: programming error"
+        )
+        push_transcript.assert_called_once_with("")
+        self.assertEqual(main.recording_state, main.RecordingState.IDLE)
+
+    def test_start_recording_cancelled_during_retry_returns_to_idle_without_error(self):
+        first_error = main.sd.PortAudioError("invalid device")
+        retry_error = main.sd.PortAudioError("still invalid")
+
+        def cancel_during_refresh():
+            with main.state_lock:
+                main.start_cancel_requested = True
+
+        with mock.patch.object(
+            main.sd, "InputStream", side_effect=[first_error, retry_error]
+        ):
+            with mock.patch.object(main, "_resolve_input_device", side_effect=cancel_during_refresh):
+                with mock.patch.object(main, "capture_focus_target", return_value=None):
+                    with mock.patch.object(main, "emit_diag") as emit_diag:
+                        with mock.patch.object(main, "push_status") as push_status:
+                            with mock.patch.object(main, "push_transcript") as push_transcript:
+                                main.start_recording()
+
+        emit_diag.assert_called_once_with(
+            "STREAM_CONSTRUCTION_RETRY", error_class="PortAudioError"
+        )
+        push_status.assert_called_once_with("idle", main.IDLE_STATUS)
+        push_transcript.assert_not_called()
+        self.assertEqual(main.recording_state, main.RecordingState.IDLE)
+
+    def test_start_recording_retry_exhausted_clears_transcript_with_error_status(self):
+        first_error = main.sd.PortAudioError("invalid device")
+        retry_error = main.sd.PortAudioError("still invalid")
+
+        with mock.patch.object(
+            main.sd, "InputStream", side_effect=[first_error, retry_error]
+        ):
+            with mock.patch.object(main, "_resolve_input_device"):
+                with mock.patch.object(main, "capture_focus_target", return_value=None):
+                    with mock.patch.object(main, "emit_diag") as emit_diag:
+                        with mock.patch.object(main, "push_status") as push_status:
+                            with mock.patch.object(main, "push_transcript") as push_transcript:
+                                main.start_recording()
+
+        self.assertEqual(
+            emit_diag.call_args_list,
+            [
+                mock.call("STREAM_CONSTRUCTION_RETRY", error_class="PortAudioError"),
+                mock.call("STREAM_CONSTRUCTION_FAILED", error_class="PortAudioError"),
+            ],
+        )
+        push_status.assert_called_once_with(
+            "error", "Could not start recording: still invalid"
+        )
+        push_transcript.assert_called_once_with("")
+        self.assertEqual(main.recording_state, main.RecordingState.IDLE)
+
 
 if __name__ == "__main__":
     unittest.main()

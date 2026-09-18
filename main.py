@@ -798,11 +798,36 @@ def start_recording():
             dtype="float32",
             callback=audio_callback,
         )
+    except sd.PortAudioError as construction_exc:
+        # Sleep, device disconnects, and CoreAudio reindexing can invalidate
+        # the startup-cached device while this start is still in STARTING.
+        emit_diag("STREAM_CONSTRUCTION_RETRY", error_class=type(construction_exc).__name__)
+        try:
+            _resolve_input_device()
+            local_stream = sd.InputStream(
+                device=resolved_input_device,
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                callback=audio_callback,
+            )
+        except Exception as exc:
+            with state_lock:
+                recording_state = RecordingState.IDLE
+                cancelled_during_retry = start_cancel_requested
+            if cancelled_during_retry:
+                push_status("idle", IDLE_STATUS)
+                return
+            emit_diag("STREAM_CONSTRUCTION_FAILED", error_class=type(exc).__name__)
+            push_status("error", f"Could not start recording: {exc}")
+            push_transcript("")
+            return
     except Exception as exc:
         with state_lock:
             recording_state = RecordingState.IDLE
         emit_diag("STREAM_CONSTRUCTION_FAILED", error_class=type(exc).__name__)
         push_status("error", f"Could not start recording: {exc}")
+        push_transcript("")
         return
 
     with state_lock:
