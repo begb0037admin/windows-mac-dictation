@@ -169,6 +169,87 @@ class TranscriptionSafetyTests(unittest.TestCase):
             {},
         )
 
+    def test_rejects_prompt_echo_variants(self):
+        for text in ("Codex", " codex ", "Codex.", "CODEX!", "Codex..."):
+            with self.subTest(text=text):
+                with self.assertRaises(
+                    transcribe_module.UnreliableTranscriptionError
+                ) as error:
+                    transcribe_module._validate_transcription(
+                        text,
+                        [
+                            {
+                                "no_speech_prob": 0.0,
+                                "avg_logprob": -0.2,
+                                "compression_ratio": 1.1,
+                            }
+                        ],
+                        {"initial_prompt": "Codex"},
+                    )
+                self.assertEqual(error.exception.reason, "prompt_echo")
+
+    def test_accepts_prompt_word_inside_genuine_dictation(self):
+        for text in ("Codex, please review the diff.", "I asked Codex to fix it"):
+            with self.subTest(text=text):
+                transcribe_module._validate_transcription(
+                    text,
+                    [
+                        {
+                            "no_speech_prob": 0.05,
+                            "avg_logprob": -0.25,
+                            "compression_ratio": 1.1,
+                        }
+                    ],
+                    {"initial_prompt": "Codex"},
+                )
+
+    def test_accepts_prompt_word_when_initial_prompt_is_empty_or_absent(self):
+        for whisper_config in ({"initial_prompt": ""}, {}):
+            with self.subTest(whisper_config=whisper_config):
+                transcribe_module._validate_transcription(
+                    "Codex",
+                    [
+                        {
+                            "no_speech_prob": 0.05,
+                            "avg_logprob": -0.25,
+                            "compression_ratio": 1.1,
+                        }
+                    ],
+                    whisper_config,
+                )
+
+    def test_transcribe_rejects_prompt_echo_but_preserves_prompt_word_in_speech(self):
+        model = mock.Mock()
+        model.transcribe.side_effect = [
+            ([types.SimpleNamespace(text=" Codex")], object()),
+            ([types.SimpleNamespace(text=" Codex, please check this")], object()),
+        ]
+        config = {
+            "backend": "faster-whisper",
+            "model_size": "large-v3-turbo",
+            "device": "cuda",
+            "compute_type": "float16",
+            "language": "en",
+            "initial_prompt": "Codex",
+        }
+        self.addCleanup(setattr, transcribe_module, "_backend", None)
+
+        with mock.patch.object(transcribe_module, "_get_model", return_value=model):
+            transcribe_module._backend = "faster-whisper"
+            with self.assertRaises(
+                transcribe_module.UnreliableTranscriptionError
+            ) as error:
+                transcribe_module.transcribe(
+                    np.zeros(160, dtype=np.float32), 16000, config
+                )
+            self.assertEqual(error.exception.reason, "prompt_echo")
+            self.assertEqual(
+                transcribe_module.transcribe(
+                    np.zeros(160, dtype=np.float32), 16000, config
+                ),
+                "Codex, please check this",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

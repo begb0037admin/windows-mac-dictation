@@ -12,6 +12,7 @@ the meeting-transcriber tool.
 """
 
 import re
+import string
 
 import numpy as np
 
@@ -50,9 +51,20 @@ def _segment_value(segment, key):
     return getattr(segment, key, None)
 
 
+def _normalize_for_prompt_echo(text):
+    """Normalise prompt/text values for whole-string echo detection."""
+    return " ".join(text.lower().strip(string.punctuation + string.whitespace).split())
+
+
 def _validate_transcription(text, segments, whisper_config):
     if not text:
         return
+    initial_prompt = whisper_config.get("initial_prompt")
+    if initial_prompt and _normalize_for_prompt_echo(text) == _normalize_for_prompt_echo(
+        initial_prompt
+    ):
+        # Whisper echoes the vocabulary prompt on silence/noise (2026-09-20).
+        raise UnreliableTranscriptionError("prompt_echo")
     if has_repetition_loop(text):
         raise UnreliableTranscriptionError("repetition_loop")
 
