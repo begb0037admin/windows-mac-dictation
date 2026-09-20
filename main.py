@@ -524,6 +524,12 @@ AUDIO_MIN_RMS = 0.0015
 AUDIO_MIN_PEAK = 0.008
 AUDIO_ACTIVITY_FLOOR = 0.003
 AUDIO_MIN_ACTIVE_FRACTION = 0.02
+# A muted/disabled/unavailable microphone delivers bit-exact (or
+# near-bit-exact) digital silence - no signal ever reaches the ADC. Real
+# ambient noise, even in a silent room, is never exactly zero (ADC/mic
+# self-noise). This lets a genuinely-off mic be told apart from a real
+# but quiet/unclear recording, which is what AUDIO_MIN_* above rejects.
+AUDIO_TRUE_SILENCE_PEAK = 1e-6
 
 
 def audio_signal_metrics(audio):
@@ -544,6 +550,15 @@ def audio_signal_is_usable(audio):
         and peak >= AUDIO_MIN_PEAK
         and active_fraction >= AUDIO_MIN_ACTIVE_FRACTION
     )
+
+
+def audio_signal_is_device_silent(audio):
+    """True only for digital silence throughout the capture - the
+    signature of a muted/disabled/unavailable microphone, as opposed to a
+    real (if quiet or unclear) recording that audio_signal_is_usable()
+    already rejects on its own, separate grounds."""
+    _, peak, _ = audio_signal_metrics(audio)
+    return peak < AUDIO_TRUE_SILENCE_PEAK
 
 
 def live_partial_transcription_enabled(whisper_config):
@@ -1103,6 +1118,21 @@ def stop_recording():
         file=sys.stderr,
     )
     if not audio_signal_is_usable(audio):
+        if audio_signal_is_device_silent(audio):
+            print(
+                'P2T_DIAG {"code":"TRANSCRIPTION_REJECTED","error_class":"no_microphone_signal"}',
+                file=sys.stderr,
+            )
+            with state_lock:
+                try:
+                    _resolve_input_device()
+                except Exception as exc:
+                    emit_diag("MIC_REACQUIRE_FAILED", error_class=type(exc).__name__)
+            push_status(
+                "error",
+                "Microphone is off or unavailable — turn it on and try again.",
+            )
+            return
         print(
             'P2T_DIAG {"code":"TRANSCRIPTION_REJECTED","error_class":"insufficient_audio_signal"}',
             file=sys.stderr,
