@@ -1,6 +1,6 @@
 {
   "name": "ptt",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "PTT - push-to-talk voice dictation. Electron shell, spawns the Python backend (dev: system Python; packaged: frozen PyInstaller executable).",
   "main": "main.js",
