@@ -344,6 +344,7 @@ const PILL_STATUS_TEXT = {
   stopping: 'Stopping…',
   recovering: 'Recovering…',
 };
+const MIC_OFF_STATUS_TEXT = 'Microphone is off or unavailable — turn it on and try again.';
 
 // ── First-run model-preparation hint (additive, informational only) ──
 //
@@ -420,7 +421,13 @@ function updateStatus(state, text) {
   // the caller (e.g. 'stopping'/'recovering' use the same short wording in
   // both places, but this stays generic for any future state too).
   if (dom.statusText) dom.statusText.textContent = text || '';
-  if (dom.pillStatus) dom.pillStatus.textContent = PILL_STATUS_TEXT[state] || (state === 'idle' ? '' : text || '');
+  // Kevin needs to distinguish the actionable mic-off error from a bare
+  // "Error" on the pill, so surface its "turn the mic on" recovery action
+  // by exact match.
+  const pillText = state === 'error' && text === MIC_OFF_STATUS_TEXT
+    ? 'Mic off'
+    : PILL_STATUS_TEXT[state] || (state === 'idle' ? '' : text || '');
+  if (dom.pillStatus) dom.pillStatus.textContent = pillText;
 
   if (state === 'idle') {
     resetWaveform();

@@ -94,7 +94,7 @@ class StopRecordingAudioSignalTests(unittest.TestCase):
         with mock.patch.object(main, "bounded_teardown_stream", return_value=True):
             with mock.patch.object(main, "push_status") as push_status:
                 with mock.patch.object(
-                    main, "_resolve_input_device", side_effect=resolve_side_effect
+                    main, "_resolve_live_input_device", side_effect=resolve_side_effect
                 ) as resolve:
                     with mock.patch.object(main, "emit_diag") as emit_diag:
                         main.stop_recording()
@@ -147,6 +147,23 @@ class StopRecordingAudioSignalTests(unittest.TestCase):
         )
         push_status.assert_called_with(
             "error", "Microphone is off or unavailable — turn it on and try again."
+        )
+
+    def test_probe_timeout_returns_without_mic_off_message(self):
+        push_status, resolve, emit_diag = self.stop_with_audio(
+            main.np.zeros(main.SAMPLE_RATE, dtype=main.np.float32),
+            resolve_side_effect=main._LiveProbeTimeout(),
+        )
+
+        self.assertEqual(main.recording_state, main.RecordingState.IDLE)
+        resolve.assert_called_once_with()
+        emit_diag.assert_not_called()
+        acquired = main.state_lock.acquire(blocking=False)
+        self.assertTrue(acquired)
+        main.state_lock.release()
+        self.assertNotIn(
+            mock.call("error", "Microphone is off or unavailable — turn it on and try again."),
+            push_status.call_args_list,
         )
 
 

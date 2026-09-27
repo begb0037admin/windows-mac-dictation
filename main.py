@@ -111,10 +111,13 @@ HOTKEY_NAME = config["hotkey"]
 
 # Resolved once by main()'s startup microphone check. It starts as None so
 # direct unit-level calls before startup retain sounddevice's default behavior;
-# main() snapshots the successful default input index without enumeration, or
-# stores a fallback index, and start_recording() uses that same index for every
-# subsequent stream.
+# main() snapshots the successful default input index and its identity, or
+# stores a fallback index and identity, and start_recording() uses that same
+# index for every subsequent stream. The identity is captured by
+# _resolve_input_device() at the same resolution point as the index; recovery
+# must never re-query a later, potentially reassigned numeric index.
 resolved_input_device = None
+resolved_input_device_identity = None
 
 # Personal vocabulary (docs/VOCABULARY_BRIEF.md): committed baseline plus an
 # optional per-machine file, merged. Used twice - a deterministic
@@ -593,24 +596,68 @@ def _is_loopback_device_name(name):
     return any(marker in lowered for marker in _LOOPBACK_DEVICE_NAME_MARKERS)
 
 
-def _resolve_input_device():
+def _device_identity(device_info):
+    """A best-effort stable identity for an audio device across repeated
+    `sd.query_devices()` calls within the same process. PortAudio/sounddevice
+    expose no persistent hardware UID on macOS - only a numeric index, which
+    is not stable: CoreAudio can renumber devices as accessories connect,
+    disconnect, or idle out, even between two enumeration calls seconds
+    apart (Codex touchpoint-3 review, 2026-09-23, flagged raw-index exclusion
+    as unsafe for exactly this reason). (name, host API) is the best
+    available proxy - not foolproof (two identically-named devices on the
+    same host API would collide) - but far better than a bare index for the
+    one thing this is used for: not re-selecting the exact device that was
+    just proven, by a real capture, to deliver no signal."""
+    return (device_info.get("name"), device_info.get("hostapi"))
+
+
+def _resolve_input_device(exclude_devices=None):
     """Validate and cache the input device used by every recording stream.
 
-    The OS default is intentionally tried first because it is the common path
-    and needs no device enumeration. If that check fails, try each
+    The OS default is intentionally tried first because it is the common path.
+    If that check fails, enumerate and try each
     input-capable device in sounddevice's reported order and retain the first
     one that accepts the configured format - real microphones first, then
     (only if nothing else works) loopback-style devices as a last resort, so
     a machine is never left with zero input rather than a poor-quality one.
     On total failure, re-raise the original default-device exception so
     main() preserves its existing fatal microphone message and exit behavior.
+
+    `exclude_devices`, when given, is a set of `_device_identity()` values to
+    skip even if they would otherwise be chosen - used by
+    `_resolve_live_input_device()` below to move past a device that was just
+    proven (by an actual capture, not just this function's own
+    format/capability check) to deliver no real signal. Confirmed live on
+    Kevin's Mac 2026-09-23: a device can pass `check_input_settings()`
+    (report valid channels/samplerate) while delivering true digital silence
+    - a paired-but-not-actually-streaming Bluetooth/wireless accessory is the
+    observed case - so without exclusion, re-resolving after a
+    confirmed-silent capture deterministically picks the exact same
+    still-enumerated, still-not-live device every time, and every following
+    press fails identically until the app is relaunched.
+
+    On every successful path this also captures
+    `resolved_input_device_identity` alongside the numeric index. Recovery
+    consumes that captured value after probing; it must not query a bare
+    index later because CoreAudio can reassign it between enumeration calls.
     """
-    global resolved_input_device
+    global resolved_input_device, resolved_input_device_identity
     resolved_input_device = None
+    resolved_input_device_identity = None
+    excluded = set(exclude_devices or ())
 
     try:
+        # Keep the index, queried info, exclusion decision, and format check
+        # tied to one default-device resolution. A later read of the default
+        # index could describe a different CoreAudio device after renumbering.
+        default_index = sd.default.device[0]
+        default_info = sd.query_devices(default_index)
+        if _device_identity(default_info) in excluded:
+            raise RuntimeError(
+                "default input device was just confirmed to deliver no signal"
+            )
         sd.check_input_settings(
-            device=None,
+            device=default_index,
             samplerate=SAMPLE_RATE,
             channels=1,
         )
@@ -624,6 +671,7 @@ def _resolve_input_device():
             (index, device_info)
             for index, device_info in enumerate(devices)
             if (device_info.get("max_input_channels") or 0) >= 1
+            and _device_identity(device_info) not in excluded
         ]
         # Real microphones before loopback/"what you hear" devices, since a
         # loopback device passing this same check is a mislead, not a fix.
@@ -640,6 +688,7 @@ def _resolve_input_device():
                 continue
 
             resolved_input_device = index
+            resolved_input_device_identity = _device_identity(device_info)
             emit_diag(
                 "MIC_FALLBACK_DEVICE_USED",
                 requested="default",
@@ -649,7 +698,139 @@ def _resolve_input_device():
 
         raise default_exc from None
 
-    resolved_input_device = sd.default.device[0]
+    resolved_input_device = default_index
+    resolved_input_device_identity = _device_identity(default_info)
+
+
+LIVE_PROBE_DURATION_S = 0.3
+LIVE_PROBE_TIMEOUT_S = 2.0
+MAX_LIVE_PROBE_ATTEMPTS = 3
+
+
+class _LiveProbeTimeout(RuntimeError):
+    """A probe timeout requires the same backend restart as stream teardown."""
+
+
+def _probe_device_is_live(device_index):
+    """A short real capture (not just a format/capability query) to confirm
+    a resolved candidate actually delivers signal. Only used from
+    `_resolve_live_input_device()`'s post-digital-silence recovery path,
+    where the extra cost is acceptable against an interaction that has
+    already failed - never on the normal hot path.
+
+    Runs `sd.rec()`/`sd.wait()` in a bounded daemon worker thread, joined
+    with `LIVE_PROBE_TIMEOUT_S`. Neither call has a timeout of its own, and
+    `stop_recording()` calls this while holding `state_lock` - a stuck
+    CoreAudio capture (the same underlying failure class already documented
+    for `bounded_teardown_stream()`'s close()-can-hang risk, see
+    `windows-mac-dictation-audio-hang-and-tray-icon.md`) must never be
+    allowed to hang that lock, and therefore every other state transition,
+    indefinitely (Codex touchpoint-3 finding, 2026-09-23).
+
+    A timeout leaves the native worker abandoned because neither sounddevice
+    call has a cancellation API. That is not treated as an ordinary silent
+    candidate: the worker may still hold the PortAudio device, so probing
+    another candidate in this process could produce a false failure. Instead
+    this function requests the same full backend recovery used for a hung
+    stream teardown and raises `_LiveProbeTimeout`; Electron owns terminating
+    the process, which is the only reliable way to release the native call.
+    """
+    outcome = {}
+
+    def worker():
+        try:
+            outcome["audio"] = sd.rec(
+                int(LIVE_PROBE_DURATION_S * SAMPLE_RATE),
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                device=device_index,
+            )
+            sd.wait()
+        except Exception as exc:
+            outcome["error"] = exc
+
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
+    worker_thread.join(LIVE_PROBE_TIMEOUT_S)
+
+    if worker_thread.is_alive():
+        emit_diag(
+            "MIC_LIVE_PROBE_TIMEOUT",
+            actual=device_index,
+            timeout_ms=int(LIVE_PROBE_TIMEOUT_S * 1000),
+        )
+        push_status("recovering", RECOVERING_STATUS)
+        emit_event({"type": "backend_recovery_required", "code": "MIC_LIVE_PROBE_TIMEOUT"})
+        raise _LiveProbeTimeout()
+    if "error" in outcome:
+        emit_diag(
+            "MIC_LIVE_PROBE_FAILED",
+            actual=device_index,
+            error_class=type(outcome["error"]).__name__,
+        )
+        return False
+    return not audio_signal_is_device_silent(np.asarray(outcome["audio"]).reshape(-1))
+
+
+def _resolve_live_input_device(max_attempts=MAX_LIVE_PROBE_ATTEMPTS):
+    """Used only after `stop_recording()` confirms a capture was true digital
+    silence. A plain `_resolve_input_device()` re-resolve isn't enough on its
+    own - confirmed live 2026-09-23 (three consecutive presses, ~30s+ apart,
+    all re-resolved to the exact same not-actually-live device and all
+    failed identically) - because it only checks format capability, not
+    whether the device is actually streaming real audio. This repeatedly
+    resolves (excluding every candidate already proven silent this call, by
+    the identity captured by `_resolve_input_device()` at the moment it
+    selected the candidate - never by re-querying a raw index, which can
+    churn between enumeration calls) and probes each with a short real
+    capture, so recovery can't converge back onto the same
+    enumerated-but-dead device.
+
+    A probe timeout raises `_LiveProbeTimeout` after requesting full backend
+    recovery. The native capture worker may still hold the audio device, so
+    trying another candidate in this process would be misleading; the normal
+    silent-candidate attempt cap therefore applies only to completed probes.
+
+    Returns True once a live device is resolved (`resolved_input_device` is
+    set to it). Returns False if every attempt within `max_attempts` was
+    silent or unresolvable - in which case `resolved_input_device` is reset
+    to `None` (rather than left pointing at a device just proven, by a real
+    capture, to deliver no signal - the next `start_recording()` call passes
+    `device=None` to `sd.InputStream()`, which sounddevice itself resolves to
+    the OS's current default at that moment, a better bet than a
+    known-dead device - Codex touchpoint-3 review, 2026-09-23)."""
+    global resolved_input_device, resolved_input_device_identity
+    excluded = set()
+    for _ in range(max_attempts):
+        _resolve_input_device(exclude_devices=excluded)
+        if resolved_input_device is None:
+            return False
+        resolved_device = resolved_input_device
+        resolved_identity = resolved_input_device_identity
+        if resolved_identity is None:
+            # The resolver could not capture an identity in the same
+            # resolution pass. Never reconstruct one from this stale numeric
+            # index after the probe; abort recovery rather than exclude the
+            # wrong physical device.
+            resolved_input_device = None
+            return False
+        try:
+            if _probe_device_is_live(resolved_device):
+                return True
+        except _LiveProbeTimeout:
+            # The recovery event has already been sent. Do not leave a
+            # device index that may still be held by the abandoned native
+            # worker available to the next start attempt in this process.
+            resolved_input_device = None
+            resolved_input_device_identity = None
+            raise
+        excluded.add(resolved_identity)
+    last_attempted = resolved_input_device
+    resolved_input_device = None
+    resolved_input_device_identity = None
+    emit_diag("MIC_LIVE_PROBE_EXHAUSTED", actual=last_attempted)
+    return False
 
 
 def log_stage_timing(code, started_at, char_count=None):
@@ -1124,8 +1305,21 @@ def stop_recording():
                 file=sys.stderr,
             )
             with state_lock:
+                # Deliberately keep recovery under state_lock: this is only
+                # the already-failed digital-silence path, never the hot
+                # recording path. The three probes are each bounded by
+                # LIVE_PROBE_TIMEOUT_S, so the probe portion can hold this
+                # lock for at most MAX_LIVE_PROBE_ATTEMPTS *
+                # LIVE_PROBE_TIMEOUT_S = 3 * 2.0 = 6.0 seconds. That is an
+                # accepted trade-off here: the user already has an error
+                # state, and spending a few seconds trying distinct devices
+                # is preferable to declaring the mic unrecoverable after one
+                # probe. A timeout instead requests backend recovery and
+                # stops further probing, so its bound is one 2-second probe.
                 try:
-                    _resolve_input_device()
+                    _resolve_live_input_device()
+                except _LiveProbeTimeout:
+                    return
                 except Exception as exc:
                     emit_diag("MIC_REACQUIRE_FAILED", error_class=type(exc).__name__)
             push_status(
