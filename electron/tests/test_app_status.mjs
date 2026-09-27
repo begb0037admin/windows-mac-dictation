@@ -92,6 +92,26 @@ test('unrelated error text keeps the generic mini-pill label', () => {
   assert.equal(harness.statusText.textContent, pasteFailure);
 });
 
+test('transcription safety rejection is distinct from an operational error', () => {
+  const harness = loadApp();
+  const rejection = 'No reliable speech was detected, so nothing was pasted.';
+
+  harness.updateStatus('rejected', rejection);
+
+  assert.equal(harness.pillStatus.textContent, 'Try again');
+  assert.equal(harness.statusText.textContent, rejection);
+  assert.equal(harness.statusLight.title, rejection);
+  assert.equal(harness.app.classList.contains('state-rejected'), true);
+  assert.equal(harness.pendingTimers.length, 1);
+
+  harness.pendingTimers[0].callback();
+
+  assert.equal(harness.statusText.textContent, 'Ready');
+  assert.equal(harness.pillStatus.textContent, '');
+  assert.equal(harness.app.classList.contains('state-rejected'), false);
+  assert.equal(harness.app.classList.contains('state-idle'), true);
+});
+
 test('error still schedules the four-second reset to idle and Ready', () => {
   const harness = loadApp();
 

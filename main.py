@@ -238,6 +238,11 @@ RECOVERING_STATUS = "Recovering from an audio problem…"
 # Mac's large-v3-turbo) download inside the transcribe() call and it would
 # otherwise look like a silent multi-minute hang.
 MODEL_PREP_STATUS = "Preparing speech model (one-time, first run)…"
+# A safety rejection means the capture and backend completed, but Whisper's
+# output was not reliable enough to paste. Keep it distinct from operational
+# failures so the UI does not report a healthy-but-uncertain utterance as an
+# app error.
+TRANSCRIPTION_REJECTED_STATUS = "No reliable speech was detected, so nothing was pasted."
 
 
 # ── Focus tracking ──
@@ -1375,7 +1380,11 @@ def stop_recording():
             f'P2T_DIAG {json.dumps({"code": "TRANSCRIPTION_REJECTED", "error_class": exc.reason})}',
             file=sys.stderr,
         )
-        push_status("error", str(exc))
+        # The model completed normally but rejected its own output as unsafe
+        # to paste. This is an expected user/input outcome, not a broken
+        # microphone or transcription service; keep it out of the operational
+        # error state so the pill cannot misreport it as "Error".
+        push_status("rejected", TRANSCRIPTION_REJECTED_STATUS)
         return
     except Exception as exc:
         print(f"[transcribe] failed: {exc}", file=sys.stderr)

@@ -135,6 +135,25 @@ class StopRecordingAudioSignalTests(unittest.TestCase):
             "error", "No clear speech was detected, so nothing was pasted."
         )
 
+    def test_model_safety_rejection_is_not_reported_as_operational_error(self):
+        audio = main.np.full(main.SAMPLE_RATE, 0.02, dtype=main.np.float32)
+        main.frames = [audio]
+        rejection = main.UnreliableTranscriptionError("low_confidence")
+
+        with mock.patch.object(main, "bounded_teardown_stream", return_value=True):
+            with mock.patch.object(main, "push_status") as push_status:
+                with mock.patch.object(main, "is_model_ready", return_value=True):
+                    with mock.patch.object(main, "transcribe", side_effect=rejection):
+                        main.stop_recording()
+
+        push_status.assert_any_call(
+            "rejected", main.TRANSCRIPTION_REJECTED_STATUS
+        )
+        self.assertNotIn(
+            mock.call("error", main.TRANSCRIPTION_REJECTED_STATUS),
+            push_status.call_args_list,
+        )
+
     def test_mic_reacquire_failure_does_not_block_mic_off_message(self):
         push_status, resolve, emit_diag = self.stop_with_audio(
             main.np.zeros(main.SAMPLE_RATE, dtype=main.np.float32),
