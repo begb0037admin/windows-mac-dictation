@@ -8,7 +8,7 @@
 
 // ── State ──
 
-const STATES = ['idle', 'recording', 'preparing-model', 'transcribing', 'cleanup', 'pasting', 'error', 'stopping', 'recovering'];
+const STATES = ['idle', 'recording', 'preparing-model', 'transcribing', 'cleanup', 'pasting', 'rejected', 'error', 'stopping', 'recovering'];
 // audioLevels must be at least as long as the larger of the two bar counts
 // below (the pill reads it at index i*2, so it needs at least
 // PILL_BAR_COUNT*2 slots too) -- a mismatch here previously left the
@@ -340,10 +340,12 @@ const PILL_STATUS_TEXT = {
   transcribing: 'Transcribing…',
   cleanup: 'Cleaning up…',
   pasting: '✓ Pasted',
+  rejected: 'Try again',
   error: 'Error',
   stopping: 'Stopping…',
   recovering: 'Recovering…',
 };
+const MIC_OFF_STATUS_TEXT = 'Microphone is off or unavailable — turn it on and try again.';
 
 // ── First-run model-preparation hint (additive, informational only) ──
 //
@@ -403,7 +405,7 @@ function armModelPrepHint() {
 
 /**
  * Called from Python/Electron to update the app state.
- * @param {string} state - One of: idle, recording, preparing-model, transcribing, cleanup, pasting, error, stopping, recovering
+ * @param {string} state - One of: idle, recording, preparing-model, transcribing, cleanup, pasting, rejected, error, stopping, recovering
  * @param {string} text - Status text, shown as the status light's hover tooltip, the full-view status text, and (via PILL_STATUS_TEXT) the pill label
  */
 function updateStatus(state, text) {
@@ -420,7 +422,13 @@ function updateStatus(state, text) {
   // the caller (e.g. 'stopping'/'recovering' use the same short wording in
   // both places, but this stays generic for any future state too).
   if (dom.statusText) dom.statusText.textContent = text || '';
-  if (dom.pillStatus) dom.pillStatus.textContent = PILL_STATUS_TEXT[state] || (state === 'idle' ? '' : text || '');
+  // Kevin needs to distinguish the actionable mic-off error from a bare
+  // "Error" on the pill, so surface its "turn the mic on" recovery action
+  // by exact match.
+  const pillText = state === 'error' && text === MIC_OFF_STATUS_TEXT
+    ? 'Mic off'
+    : PILL_STATUS_TEXT[state] || (state === 'idle' ? '' : text || '');
+  if (dom.pillStatus) dom.pillStatus.textContent = pillText;
 
   if (state === 'idle') {
     resetWaveform();
@@ -433,14 +441,14 @@ function updateStatus(state, text) {
     showFlash('✓ Pasted');
   }
 
-  // The existing four-second error auto-reset does not apply to
+  // The existing four-second transient-state auto-reset does not apply to
   // 'recovering' - that state's duration is driven entirely by real
   // backend-recovery events (a replacement backend's 'ready'), not a timer,
   // so auto-resetting to idle after 4s would show a false "all clear"
   // while a recovery could still genuinely be in progress.
-  if (state === 'error') {
+  if (state === 'error' || state === 'rejected') {
     setTimeout(() => {
-      if (currentState === 'error') {
+      if (currentState === state) {
         updateStatus('idle', 'Ready');
       }
     }, 4000);

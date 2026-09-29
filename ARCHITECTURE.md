@@ -32,10 +32,12 @@ Only the "send" step touches the focused application. Everything before it is lo
 
 ```
 idle -> recording -> transcribing -> cleanup -> review -> pasting -> idle
-                                              (any state) -> error -> idle
+                                              (safety rejection) -> rejected -> idle
+                                              (operational failure) -> error -> idle
 ```
 
 - **review** (added 2026-07-26) is a deliberate stop: the cleaned transcript is shown editable in the UI. The user presses **Enter**/**Send** to paste, or **Esc**/**Dismiss** to discard. This replaced the original "paste happens once, cleanly, on release" behavior described in `docs/BUILD_BRIEF.md` §11 — the pipeline no longer auto-pastes; see `HANDOVER.md` 2026-07-26.
+- **rejected** is used when Whisper completed but rejected its output as unsafe to paste (for example low confidence, prompt echo, or a repetition loop); it auto-returns to idle after ~4s without calling this an app failure.
 - **error** can be entered from most stages (mic failure, transcription exception — cleanup failure instead falls back to the raw transcript rather than erroring, see §5) and auto-returns to idle after ~4s (`app.js`).
 
 ## 4. Threading model

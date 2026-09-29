@@ -562,6 +562,11 @@ body.pill-mode .app {
   box-shadow: 0 0 0 3px rgba(108, 226, 182, 0.2);
 }
 
+.app.state-rejected .status-light {
+  background: #f5a524;
+  box-shadow: 0 0 0 3px rgba(245, 165, 36, 0.2);
+}
+
 .app.state-error .status-light {
   background: var(--accent-red);
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
@@ -590,6 +595,11 @@ body.pill-mode .app {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.app.state-rejected #statusText {
+  color: #f5a524;
+  font-weight: 700;
 }
 
 .app.state-error #statusText {
