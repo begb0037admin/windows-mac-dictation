@@ -132,7 +132,9 @@ class StopRecordingAudioSignalTests(unittest.TestCase):
 
         resolve.assert_not_called()
         push_status.assert_called_with(
-            "error", "No clear speech was detected, so nothing was pasted."
+            "error",
+            "No audio detected — check your mic isn't muted (the BCC950 "
+            "ConferenceCam has a physical mute button on its base).",
         )
 
     def test_mic_reacquire_failure_does_not_block_mic_off_message(self):

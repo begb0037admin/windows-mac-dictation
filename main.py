@@ -1139,7 +1139,8 @@ def stop_recording():
         )
         push_status(
             "error",
-            "No clear speech was detected, so nothing was pasted.",
+            "No audio detected — check your mic isn't muted (the BCC950 "
+            "ConferenceCam has a physical mute button on its base).",
         )
         return
 
